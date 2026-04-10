@@ -19,19 +19,19 @@ type NetworkInfo = {
   type?: string;
   downlink?: number;
   rtt?: number;
+
+  ipInfo?: {
+    ip?: string;
+    city?: string;
+    region?: string;
+    country?: string;
+    org?: string; // ISP
+  };
 };
 
 type BatteryInfo = {
   level?: number;
   charging?: boolean;
-};
-
-type IPInfo = {
-  ip?: string;
-  city?: string;
-  region?: string;
-  country?: string;
-  org?: string; // ISP
 };
 
 export default function Sender({ sessionId }: Props) {
@@ -52,8 +52,6 @@ export default function Sender({ sessionId }: Props) {
   const [device, setDevice] = useState<DeviceInfo | null>(null);
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
   const [battery, setBattery] = useState<BatteryInfo | null>(null);
-
-  const [ipInfo, setIpInfo] = useState<IPInfo | null>(null);
 
   /* -----------------------------
      INIT
@@ -77,33 +75,33 @@ export default function Sender({ sessionId }: Props) {
     })();
 
     /* -----------------------------
-       NETWORK INFO
+       NETWORK INFO (BASIC)
     ------------------------------*/
     const conn =
       (navigator as any).connection ||
       (navigator as any).mozConnection ||
       (navigator as any).webkitConnection;
 
-    if (conn) {
-      const net: NetworkInfo = {
-        type: conn.effectiveType,
-        downlink: conn.downlink,
-        rtt: conn.rtt,
-      };
+    const baseNetwork: NetworkInfo = conn
+      ? {
+          type: conn.effectiveType,
+          downlink: conn.downlink,
+          rtt: conn.rtt,
+        }
+      : {};
 
-      setNetwork(net);
-      update(sessionRef, { network: net });
-    }
+    setNetwork(baseNetwork);
+    update(sessionRef, { network: baseNetwork });
 
     /* -----------------------------
-       🔥 IP + ISP + CITY FETCH (NEW)
+       🌍 ISP + CITY + COUNTRY (FIXED)
     ------------------------------*/
     const fetchIPInfo = async () => {
       try {
         const res = await fetch("https://ipapi.co/json/");
         const data = await res.json();
 
-        const info: IPInfo = {
+        const ipInfo = {
           ip: data.ip,
           city: data.city,
           region: data.region,
@@ -111,16 +109,20 @@ export default function Sender({ sessionId }: Props) {
           org: data.org, // ISP
         };
 
-        setIpInfo(info);
+        setNetwork((prev) => {
+          const updated = {
+            ...prev,
+            ipInfo,
+          };
 
-        update(sessionRef, {
-          network: {
-            ...network,
-            ipInfo: info,
-          },
+          update(sessionRef, {
+            network: updated,
+          });
+
+          return updated;
         });
       } catch (err) {
-        console.log("IP fetch failed", err);
+        console.log("IP API failed:", err);
       }
     };
 
@@ -151,7 +153,7 @@ export default function Sender({ sessionId }: Props) {
     }
 
     /* -----------------------------
-       PRESENCE
+       PRESENCE SYSTEM
     ------------------------------*/
     const unsubscribe = onValue(connectedRef, (snap) => {
       const connected = snap.val();
@@ -195,7 +197,7 @@ export default function Sender({ sessionId }: Props) {
     }, 8000);
 
     /* -----------------------------
-       GPS
+       GPS TRACKING
     ------------------------------*/
     const handleSuccess = (pos: GeolocationPosition) => {
       const now = Date.now();
@@ -256,14 +258,13 @@ export default function Sender({ sessionId }: Props) {
   }, [sessionId]);
 
   /* -----------------------------
-     UI
+     UI (DEBUG)
   ------------------------------*/
   return (
     <div style={styles.container}>
       <h3>📡 Live Sender</h3>
 
       <p>Status: {status}</p>
-
       <p>Ping: {ping} ms</p>
 
       {coords && (
@@ -272,12 +273,13 @@ export default function Sender({ sessionId }: Props) {
         </p>
       )}
 
-      {/* NEW IP INFO */}
-      {ipInfo && (
+      {/* 🌍 IP + ISP + CITY */}
+      {network?.ipInfo && (
         <div style={{ marginTop: 10 }}>
-          <p>IP: {ipInfo.ip}</p>
-          <p>City: {ipInfo.city}</p>
-          <p>ISP: {ipInfo.org}</p>
+          <p>IP: {network.ipInfo.ip}</p>
+          <p>City: {network.ipInfo.city}</p>
+          <p>Country: {network.ipInfo.country}</p>
+          <p>ISP: {network.ipInfo.org}</p>
         </div>
       )}
 

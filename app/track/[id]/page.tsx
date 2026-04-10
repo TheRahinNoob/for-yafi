@@ -34,6 +34,14 @@ type NetworkInfo = {
   type?: string;
   downlink?: number;
   rtt?: number;
+
+  ipInfo?: {
+    ip?: string;
+    city?: string;
+    region?: string;
+    country?: string;
+    org?: string; // ISP
+  };
 };
 
 type SessionData = {
@@ -68,7 +76,7 @@ export default function TrackPage() {
   const [battery, setBattery] = useState<BatteryInfo | null>(null);
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
 
-  /* ---------------- FIREBASE LISTENER ---------------- */
+  /* ---------------- FIREBASE ---------------- */
 
   useEffect(() => {
     if (!id) return;
@@ -97,7 +105,7 @@ export default function TrackPage() {
       if (typeof data.pingMs === "number") setPing(data.pingMs);
       if (typeof data.accuracy === "number") setAccuracy(data.accuracy);
 
-      /* DEVICE + BATCH DATA */
+      /* DEVICE / BATTERY */
       setDevice(data.device ?? null);
       setBattery(data.battery ?? null);
       setNetwork(data.network ?? null);
@@ -115,7 +123,15 @@ export default function TrackPage() {
     return () => unsubscribe();
   }, [id]);
 
-  /* ---------------- STRENGTH ---------------- */
+  /* ---------------- SAFE ISP EXTRACTOR ---------------- */
+
+  const ipInfo =
+    network?.ipInfo ??
+    (network as any)?.ip ??
+    (network as any)?.ispLayer ??
+    null;
+
+  /* ---------------- CONNECTION SCORE ---------------- */
 
   const getStrength = () => {
     if (status !== "online") return 0;
@@ -225,28 +241,25 @@ export default function TrackPage() {
       {/* RIGHT */}
       <div style={styles.rightPanel}>
         <h2>📊 Dashboard</h2>
-        <p>Session ID: {id}</p>
+        <p style={{ opacity: 0.7 }}>Session ID: {id}</p>
 
-        {/* DEVICE CARD (WITH BATTERY INSIDE) */}
+        {/* DEVICE */}
         <div style={styles.cardRight}>
           <h3>📱 Device Info</h3>
 
           {device ? (
             <>
-              <p style={{ fontSize: 18 }}>
+              <p style={{ fontSize: 18, fontWeight: 600 }}>
                 {device.brand ?? "Unknown"} {device.model ?? ""}
               </p>
-
               <p>
                 {device.os ?? "Unknown OS"} • {device.browser ?? "Unknown"}
               </p>
-
               <p style={{ opacity: 0.6 }}>
                 Type: {device.type ?? "Unknown"}
               </p>
 
-              {/* BATTERY INSIDE DEVICE CARD */}
-              <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #374151" }}>
+              <div style={styles.subSection}>
                 <p>
                   🔋 Battery:{" "}
                   {battery?.level !== undefined
@@ -261,7 +274,7 @@ export default function TrackPage() {
           )}
         </div>
 
-        {/* NETWORK CARD */}
+        {/* NETWORK + ISP */}
         <div style={styles.cardRight}>
           <h3>🌐 Network Info</h3>
 
@@ -270,6 +283,14 @@ export default function TrackPage() {
               <p>Type: {network.type ?? "unknown"}</p>
               <p>Speed: {network.downlink ?? "?"} Mbps</p>
               <p>RTT: {network.rtt ?? "?"} ms</p>
+
+              <div style={styles.subSection}>
+                <p style={{ fontWeight: 600 }}>🌍 ISP / Location Layer</p>
+
+                <p>ISP: {ipInfo?.org ?? "Not detected"}</p>
+                <p>City: {ipInfo?.city ?? "Unknown"}</p>
+                <p>Country: {ipInfo?.country ?? "Unknown"}</p>
+              </div>
             </>
           ) : (
             <p>Loading network...</p>
@@ -332,12 +353,18 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#1f2937",
   },
 
+  subSection: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTop: "1px solid #374151",
+  },
+
   loading: {
     height: "100vh",
     display: "flex",
-    flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
+    flexDirection: "column",
     background: "#0b1220",
     color: "white",
   },
