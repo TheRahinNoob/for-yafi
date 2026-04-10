@@ -26,7 +26,7 @@ type BatteryInfo = {
   charging?: boolean;
 };
 
-type IpInfo = {
+type IPInfo = {
   ip?: string;
   city?: string;
   region?: string;
@@ -52,7 +52,8 @@ export default function Sender({ sessionId }: Props) {
   const [device, setDevice] = useState<DeviceInfo | null>(null);
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
   const [battery, setBattery] = useState<BatteryInfo | null>(null);
-  const [ipInfo, setIpInfo] = useState<IpInfo | null>(null);
+
+  const [ipInfo, setIpInfo] = useState<IPInfo | null>(null);
 
   /* -----------------------------
      INIT
@@ -76,16 +77,14 @@ export default function Sender({ sessionId }: Props) {
     })();
 
     /* -----------------------------
-       NETWORK INFO (LIVE)
+       NETWORK INFO
     ------------------------------*/
     const conn =
       (navigator as any).connection ||
       (navigator as any).mozConnection ||
       (navigator as any).webkitConnection;
 
-    const pushNetwork = () => {
-      if (!conn) return;
-
+    if (conn) {
       const net: NetworkInfo = {
         type: conn.effectiveType,
         downlink: conn.downlink,
@@ -94,51 +93,17 @@ export default function Sender({ sessionId }: Props) {
 
       setNetwork(net);
       update(sessionRef, { network: net });
-    };
-
-    if (conn) {
-      pushNetwork();
-      conn.addEventListener?.("change", pushNetwork);
     }
 
     /* -----------------------------
-       BATTERY INFO (SAFE + CLEAN)
+       🔥 IP + ISP + CITY FETCH (NEW)
     ------------------------------*/
-    const nav = navigator as any;
-    let batteryObj: any = null;
-
-    const pushBattery = () => {
-      if (!batteryObj) return;
-
-      const info: BatteryInfo = {
-        level: batteryObj.level,
-        charging: batteryObj.charging,
-      };
-
-      setBattery(info);
-      update(sessionRef, { battery: info });
-    };
-
-    if (nav.getBattery) {
-      nav.getBattery().then((bat: any) => {
-        batteryObj = bat;
-
-        pushBattery();
-
-        bat.addEventListener("levelchange", pushBattery);
-        bat.addEventListener("chargingchange", pushBattery);
-      });
-    }
-
-    /* -----------------------------
-       IP + ISP + CITY (REAL)
-    ------------------------------*/
-    (async () => {
+    const fetchIPInfo = async () => {
       try {
         const res = await fetch("https://ipapi.co/json/");
         const data = await res.json();
 
-        const info: IpInfo = {
+        const info: IPInfo = {
           ip: data.ip,
           city: data.city,
           region: data.region,
@@ -149,15 +114,44 @@ export default function Sender({ sessionId }: Props) {
         setIpInfo(info);
 
         update(sessionRef, {
-          ipInfo: info,
+          network: {
+            ...network,
+            ipInfo: info,
+          },
         });
       } catch (err) {
         console.log("IP fetch failed", err);
       }
-    })();
+    };
+
+    fetchIPInfo();
 
     /* -----------------------------
-       PRESENCE SYSTEM
+       BATTERY INFO
+    ------------------------------*/
+    const nav = navigator as any;
+
+    if (nav.getBattery) {
+      nav.getBattery().then((bat: any) => {
+        const updateBattery = () => {
+          const info: BatteryInfo = {
+            level: bat.level,
+            charging: bat.charging,
+          };
+
+          setBattery(info);
+          update(sessionRef, { battery: info });
+        };
+
+        updateBattery();
+
+        bat.addEventListener("levelchange", updateBattery);
+        bat.addEventListener("chargingchange", updateBattery);
+      });
+    }
+
+    /* -----------------------------
+       PRESENCE
     ------------------------------*/
     const unsubscribe = onValue(connectedRef, (snap) => {
       const connected = snap.val();
@@ -180,7 +174,7 @@ export default function Sender({ sessionId }: Props) {
     });
 
     /* -----------------------------
-       HEARTBEAT / PING
+       HEARTBEAT
     ------------------------------*/
     heartbeatRef.current = setInterval(async () => {
       const start = Date.now();
@@ -201,7 +195,7 @@ export default function Sender({ sessionId }: Props) {
     }, 8000);
 
     /* -----------------------------
-       GPS TRACKING
+       GPS
     ------------------------------*/
     const handleSuccess = (pos: GeolocationPosition) => {
       const now = Date.now();
@@ -216,7 +210,6 @@ export default function Sender({ sessionId }: Props) {
       lastGpsUpdate.current = now;
 
       setCoords({ lat, lng, accuracy });
-
       setStatus("online");
 
       update(sessionRef, {
@@ -255,10 +248,6 @@ export default function Sender({ sessionId }: Props) {
         clearInterval(heartbeatRef.current);
       }
 
-      if (conn?.removeEventListener) {
-        conn.removeEventListener("change", pushNetwork);
-      }
-
       update(sessionRef, {
         status: "offline",
         lastSeen: Date.now(),
@@ -267,13 +256,14 @@ export default function Sender({ sessionId }: Props) {
   }, [sessionId]);
 
   /* -----------------------------
-     DEBUG UI
+     UI
   ------------------------------*/
   return (
     <div style={styles.container}>
-      <h3>📡 Sender Active</h3>
+      <h3>📡 Live Sender</h3>
 
       <p>Status: {status}</p>
+
       <p>Ping: {ping} ms</p>
 
       {coords && (
@@ -282,10 +272,13 @@ export default function Sender({ sessionId }: Props) {
         </p>
       )}
 
+      {/* NEW IP INFO */}
       {ipInfo && (
-        <p>
-          🌍 {ipInfo.city}, {ipInfo.country} | ISP: {ipInfo.org}
-        </p>
+        <div style={{ marginTop: 10 }}>
+          <p>IP: {ipInfo.ip}</p>
+          <p>City: {ipInfo.city}</p>
+          <p>ISP: {ipInfo.org}</p>
+        </div>
       )}
 
       {device && (
@@ -318,5 +311,6 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 12,
     maxWidth: 420,
     margin: "20px auto",
+    fontFamily: "sans-serif",
   },
 };
