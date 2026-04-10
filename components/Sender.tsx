@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { db } from "@/lib/firebase";
 import { ref, update, onDisconnect, onValue } from "firebase/database";
-
 import { getDeviceInfo, DeviceInfo } from "@/lib/deviceDetector";
 
 type Props = {
@@ -31,7 +30,9 @@ export default function Sender({ sessionId }: Props) {
   const watchIdRef = useRef<number | null>(null);
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
   const lastGpsUpdate = useRef<number>(0);
-  const isMounted = useRef(true);
+
+  const batteryRef = useRef<any>(null);
+  const connectionUnsubRef = useRef<(() => void) | null>(null);
 
   const sessionRef = ref(db, `sessions/${sessionId}`);
   const connectedRef = ref(db, ".info/connected");
@@ -50,23 +51,21 @@ export default function Sender({ sessionId }: Props) {
      INIT
   ------------------------------*/
   useEffect(() => {
-    isMounted.current = true;
-
     if (!sessionId || !navigator.geolocation) {
       setStatus("error");
       return;
     }
 
+    let mounted = true;
+
     /* -----------------------------
-       DEVICE INFO (ONE TIME)
+       DEVICE INFO
     ------------------------------*/
     (async () => {
       const info = await getDeviceInfo();
       setDevice(info);
 
-      update(sessionRef, {
-        device: info,
-      });
+      update(sessionRef, { device: info });
     })();
 
     /* -----------------------------
@@ -85,52 +84,39 @@ export default function Sender({ sessionId }: Props) {
       };
 
       setNetwork(net);
-
-      update(sessionRef, {
-        network: net,
-      });
+      update(sessionRef, { network: net });
     }
 
     /* -----------------------------
-       BATTERY INFO
+       BATTERY INFO (FIXED)
     ------------------------------*/
-    if ("getBattery" in navigator) {
-      (navigator as any).getBattery().then((bat: any) => {
-        const info: BatteryInfo = {
-          level: bat.level,
-          charging: bat.charging,
+    const nav = navigator as any;
+
+    if (nav.getBattery) {
+      nav.getBattery().then((bat: any) => {
+        const updateBattery = () => {
+          const info: BatteryInfo = {
+            level: bat.level,
+            charging: bat.charging,
+          };
+
+          setBattery(info);
+          update(sessionRef, { battery: info });
         };
 
-        setBattery(info);
+        updateBattery();
 
-        update(sessionRef, {
-          battery: info,
-        });
+        bat.addEventListener("levelchange", updateBattery);
+        bat.addEventListener("chargingchange", updateBattery);
 
-        bat.addEventListener("levelchange", () => {
-          update(sessionRef, {
-            battery: {
-              level: bat.level,
-              charging: bat.charging,
-            },
-          });
-        });
-
-        bat.addEventListener("chargingchange", () => {
-          update(sessionRef, {
-            battery: {
-              level: bat.level,
-              charging: bat.charging,
-            },
-          });
-        });
+        batteryRef.current = { bat, updateBattery };
       });
     }
 
     /* -----------------------------
-       PRESENCE SYSTEM
+       PRESENCE
     ------------------------------*/
-    const unsubscribe = onValue(connectedRef, (snap) => {
+    connectionUnsubRef.current = onValue(connectedRef, (snap) => {
       const connected = snap.val();
 
       if (connected) {
@@ -157,12 +143,9 @@ export default function Sender({ sessionId }: Props) {
       const start = Date.now();
 
       try {
-        await update(sessionRef, {
-          heartbeat: start,
-        });
+        await update(sessionRef, { heartbeat: start });
 
         const latency = Date.now() - start;
-
         setPing(latency);
 
         update(sessionRef, {
@@ -175,7 +158,7 @@ export default function Sender({ sessionId }: Props) {
     }, 8000);
 
     /* -----------------------------
-       GPS TRACKING
+       GPS TRACKING (FIXED STRUCTURE)
     ------------------------------*/
     const handleSuccess = (pos: GeolocationPosition) => {
       const now = Date.now();
@@ -185,19 +168,18 @@ export default function Sender({ sessionId }: Props) {
       const accuracy = pos.coords.accuracy;
 
       if (isNaN(lat) || isNaN(lng)) return;
-
       if (now - lastGpsUpdate.current < 2000) return;
+
       lastGpsUpdate.current = now;
 
       setCoords({ lat, lng, accuracy });
       setStatus("online");
 
+      // IMPORTANT FIX: flat structure (tracker compatibility)
       update(sessionRef, {
-        location: {
-          lat,
-          lng,
-          accuracy,
-        },
+        lat,
+        lng,
+        accuracy,
         timestamp: now,
         lastSeen: now,
         status: "online",
@@ -220,7 +202,7 @@ export default function Sender({ sessionId }: Props) {
        CLEANUP
     ------------------------------*/
     return () => {
-      isMounted.current = false;
+      mounted = false;
 
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
@@ -230,7 +212,15 @@ export default function Sender({ sessionId }: Props) {
         clearInterval(heartbeatRef.current);
       }
 
-      unsubscribe();
+      if (connectionUnsubRef.current) {
+        connectionUnsubRef.current();
+      }
+
+      if (batteryRef.current?.bat) {
+        const bat = batteryRef.current.bat;
+        bat.removeEventListener("levelchange", batteryRef.current.updateBattery);
+        bat.removeEventListener("chargingchange", batteryRef.current.updateBattery);
+      }
 
       update(sessionRef, {
         status: "offline",

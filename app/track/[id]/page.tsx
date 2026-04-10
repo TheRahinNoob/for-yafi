@@ -39,9 +39,11 @@ export default function TrackPage() {
 
   const [pos, setPos] = useState<Pos | null>(null);
   const [status, setStatus] = useState<"online" | "offline" | "loading">("loading");
+
   const [lastSeen, setLastSeen] = useState<number | null>(null);
   const [ping, setPing] = useState<number | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
+
   const [device, setDevice] = useState<DeviceInfo | null>(null);
 
   useEffect(() => {
@@ -50,7 +52,7 @@ export default function TrackPage() {
     const sessionRef = ref(db, `sessions/${id}`);
 
     const unsubscribe = onValue(sessionRef, (snap) => {
-      const data: SessionData = snap.val();
+      const data: SessionData | null = snap.val();
 
       if (!data) {
         setStatus("offline");
@@ -58,53 +60,50 @@ export default function TrackPage() {
         return;
       }
 
-      /* -----------------------------
-         LOCATION
-      ------------------------------*/
+      // --------------------------
+      // LOCATION
+      // --------------------------
       if (typeof data.lat === "number" && typeof data.lng === "number") {
         setPos({ lat: data.lat, lng: data.lng });
       }
 
-      /* -----------------------------
-         LAST SEEN
-      ------------------------------*/
+      // --------------------------
+      // TIME HANDLING (SAFE)
+      // --------------------------
       const last = data.lastSeen ?? data.timestamp ?? null;
       if (typeof last === "number") {
         setLastSeen(last);
       }
 
-      /* -----------------------------
-         PING / ACCURACY
-      ------------------------------*/
+      // --------------------------
+      // PING / ACCURACY
+      // --------------------------
       if (typeof data.pingMs === "number") setPing(data.pingMs);
       if (typeof data.accuracy === "number") setAccuracy(data.accuracy);
 
-      /* -----------------------------
-         DEVICE
-      ------------------------------*/
-      if (data.device) {
-        setDevice(data.device);
-      }
+      // --------------------------
+      // DEVICE
+      // --------------------------
+      setDevice(data.device ?? null);
 
-      /* -----------------------------
-         ONLINE / OFFLINE LOGIC
-      ------------------------------*/
+      // --------------------------
+      // ONLINE / OFFLINE LOGIC
+      // --------------------------
       const now = Date.now();
-      const diff = last ? now - last : Infinity;
+      const lastTime = last ?? 0;
 
-      if (data.status === "offline" || diff > 20000) {
-        setStatus("offline");
-      } else {
-        setStatus("online");
-      }
+      const isOffline =
+        data.status === "offline" || now - lastTime > 20000;
+
+      setStatus(isOffline ? "offline" : "online");
     });
 
     return () => unsubscribe();
   }, [id]);
 
-  /* -----------------------------
-     CONNECTION STRENGTH
-  ------------------------------*/
+  // --------------------------
+  // CONNECTION STRENGTH
+  // --------------------------
   const getStrength = () => {
     if (status !== "online") return 0;
 
@@ -121,7 +120,7 @@ export default function TrackPage() {
       else if (accuracy > 50) score -= 15;
     }
 
-    if (lastSeen !== null) {
+    if (lastSeen) {
       const diff = Date.now() - lastSeen;
       if (diff > 10000) score -= 20;
       if (diff > 20000) score -= 40;
@@ -132,9 +131,6 @@ export default function TrackPage() {
 
   const strength = getStrength();
 
-  /* -----------------------------
-     TIME FORMAT
-  ------------------------------*/
   const formatLastSeen = () => {
     if (!lastSeen) return "unknown";
 
@@ -149,9 +145,6 @@ export default function TrackPage() {
     return `${Math.floor(min / 60)} hr ago`;
   };
 
-  /* -----------------------------
-     LOADING STATE
-  ------------------------------*/
   if (!pos) {
     return (
       <div style={styles.loading}>
@@ -163,17 +156,13 @@ export default function TrackPage() {
 
   return (
     <div style={styles.page}>
-      {/* LEFT SIDE */}
+      {/* LEFT PANEL */}
       <div style={styles.leftPanel}>
-        {/* MAP */}
         <div style={styles.mapBox}>
           <LiveMap lat={pos.lat} lng={pos.lng} />
         </div>
 
-        {/* INFO STACK */}
         <div style={styles.infoStack}>
-
-          {/* STATUS */}
           <div style={styles.card}>
             <p>Status</p>
             <h3 style={{ color: status === "online" ? "#22c55e" : "#ef4444" }}>
@@ -181,7 +170,6 @@ export default function TrackPage() {
             </h3>
           </div>
 
-          {/* LOCATION */}
           <div style={styles.card}>
             <p>Latitude</p>
             <h3>{pos.lat.toFixed(6)}</h3>
@@ -190,19 +178,16 @@ export default function TrackPage() {
             <h3>{pos.lng.toFixed(6)}</h3>
           </div>
 
-          {/* LAST SEEN */}
           <div style={styles.card}>
             <p>Last Seen</p>
             <h3>{formatLastSeen()}</h3>
           </div>
 
-          {/* PING */}
           <div style={styles.card}>
             <p>Ping</p>
             <h3>{ping !== null ? `${ping} ms` : "unknown"}</h3>
           </div>
 
-          {/* CONNECTION */}
           <div style={styles.card}>
             <p>Connection Strength</p>
             <h3
@@ -218,53 +203,48 @@ export default function TrackPage() {
               {strength}%
             </h3>
           </div>
-
-          {/* DEVICE CARD */}
-          <div style={styles.card}>
-            <p>📱 Device Info</p>
-
-            {device ? (
-              <>
-                <h3>
-                  {device.brand ? `${device.brand} ` : ""}
-                  {device.model || "Unknown Device"}
-                </h3>
-
-                <p style={{ opacity: 0.7 }}>
-                  {device.os} • {device.browser}
-                </p>
-
-                <p style={{ opacity: 0.5 }}>
-                  {device.type}
-                </p>
-              </>
-            ) : (
-              <h3>Detecting...</h3>
-            )}
-          </div>
-
-          {/* FUTURE ISP/IP PLACEHOLDER */}
-          <div style={styles.card}>
-            <p>🌐 Network Info (Coming Soon)</p>
-            <h3 style={{ opacity: 0.6 }}>
-              IP / ISP integration pending
-            </h3>
-          </div>
         </div>
       </div>
 
-      {/* RIGHT PANEL */}
+      {/* RIGHT PANEL (DASHBOARD FIXED) */}
       <div style={styles.rightPanel}>
         <h2>📊 Dashboard</h2>
         <p>Session ID: {id}</p>
+
+        {/* DEVICE CARD (CLEAN + SAFE) */}
+        <div style={styles.cardRight}>
+          <h3>📱 Device Info</h3>
+
+          {device ? (
+            <>
+              <p style={{ fontSize: 18 }}>
+                {device.brand ?? "Unknown"} {device.model ?? ""}
+              </p>
+              <p>
+                {device.os ?? "Unknown OS"} • {device.browser ?? "Unknown"}
+              </p>
+              <p style={{ opacity: 0.6 }}>
+                Type: {device.type ?? "Unknown"}
+              </p>
+            </>
+          ) : (
+            <p>Waiting for device info...</p>
+          )}
+        </div>
+
+        {/* NETWORK CARD (READY FOR IP API) */}
+        <div style={styles.cardRight}>
+          <h3>🌐 Network Info</h3>
+          <p>IP: (ready for API integration)</p>
+          <p>ISP: (ready for API integration)</p>
+          <p>Network: auto-detect later</p>
+        </div>
       </div>
     </div>
   );
 }
 
-/* -----------------------------
-   STYLES
-------------------------------*/
+/* 🎨 STYLES */
 const styles: Record<string, React.CSSProperties> = {
   page: {
     display: "flex",
@@ -304,6 +284,13 @@ const styles: Record<string, React.CSSProperties> = {
 
   card: {
     padding: 12,
+    borderRadius: 12,
+    background: "#1f2937",
+  },
+
+  cardRight: {
+    marginTop: 16,
+    padding: 16,
     borderRadius: 12,
     background: "#1f2937",
   },
