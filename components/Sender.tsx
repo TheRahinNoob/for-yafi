@@ -26,13 +26,18 @@ type BatteryInfo = {
   charging?: boolean;
 };
 
+type IpInfo = {
+  ip?: string;
+  city?: string;
+  region?: string;
+  country?: string;
+  org?: string; // ISP
+};
+
 export default function Sender({ sessionId }: Props) {
   const watchIdRef = useRef<number | null>(null);
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
   const lastGpsUpdate = useRef<number>(0);
-
-  const batteryRef = useRef<any>(null);
-  const connectionUnsubRef = useRef<(() => void) | null>(null);
 
   const sessionRef = ref(db, `sessions/${sessionId}`);
   const connectedRef = ref(db, ".info/connected");
@@ -43,9 +48,11 @@ export default function Sender({ sessionId }: Props) {
 
   const [coords, setCoords] = useState<Coords | null>(null);
   const [ping, setPing] = useState<number>(0);
+
   const [device, setDevice] = useState<DeviceInfo | null>(null);
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
   const [battery, setBattery] = useState<BatteryInfo | null>(null);
+  const [ipInfo, setIpInfo] = useState<IpInfo | null>(null);
 
   /* -----------------------------
      INIT
@@ -69,14 +76,16 @@ export default function Sender({ sessionId }: Props) {
     })();
 
     /* -----------------------------
-       NETWORK INFO
+       NETWORK INFO (LIVE)
     ------------------------------*/
     const conn =
       (navigator as any).connection ||
       (navigator as any).mozConnection ||
       (navigator as any).webkitConnection;
 
-    if (conn) {
+    const pushNetwork = () => {
+      if (!conn) return;
+
       const net: NetworkInfo = {
         type: conn.effectiveType,
         downlink: conn.downlink,
@@ -85,38 +94,72 @@ export default function Sender({ sessionId }: Props) {
 
       setNetwork(net);
       update(sessionRef, { network: net });
+    };
+
+    if (conn) {
+      pushNetwork();
+      conn.addEventListener?.("change", pushNetwork);
     }
 
     /* -----------------------------
-       BATTERY INFO (FIXED)
+       BATTERY INFO (SAFE + CLEAN)
     ------------------------------*/
     const nav = navigator as any;
+    let batteryObj: any = null;
+
+    const pushBattery = () => {
+      if (!batteryObj) return;
+
+      const info: BatteryInfo = {
+        level: batteryObj.level,
+        charging: batteryObj.charging,
+      };
+
+      setBattery(info);
+      update(sessionRef, { battery: info });
+    };
 
     if (nav.getBattery) {
       nav.getBattery().then((bat: any) => {
-        const updateBattery = () => {
-          const info: BatteryInfo = {
-            level: bat.level,
-            charging: bat.charging,
-          };
+        batteryObj = bat;
 
-          setBattery(info);
-          update(sessionRef, { battery: info });
-        };
+        pushBattery();
 
-        updateBattery();
-
-        bat.addEventListener("levelchange", updateBattery);
-        bat.addEventListener("chargingchange", updateBattery);
-
-        batteryRef.current = { bat, updateBattery };
+        bat.addEventListener("levelchange", pushBattery);
+        bat.addEventListener("chargingchange", pushBattery);
       });
     }
 
     /* -----------------------------
-       PRESENCE
+       IP + ISP + CITY (REAL)
     ------------------------------*/
-    connectionUnsubRef.current = onValue(connectedRef, (snap) => {
+    (async () => {
+      try {
+        const res = await fetch("https://ipapi.co/json/");
+        const data = await res.json();
+
+        const info: IpInfo = {
+          ip: data.ip,
+          city: data.city,
+          region: data.region,
+          country: data.country_name,
+          org: data.org, // ISP
+        };
+
+        setIpInfo(info);
+
+        update(sessionRef, {
+          ipInfo: info,
+        });
+      } catch (err) {
+        console.log("IP fetch failed", err);
+      }
+    })();
+
+    /* -----------------------------
+       PRESENCE SYSTEM
+    ------------------------------*/
+    const unsubscribe = onValue(connectedRef, (snap) => {
       const connected = snap.val();
 
       if (connected) {
@@ -158,7 +201,7 @@ export default function Sender({ sessionId }: Props) {
     }, 8000);
 
     /* -----------------------------
-       GPS TRACKING (FIXED STRUCTURE)
+       GPS TRACKING
     ------------------------------*/
     const handleSuccess = (pos: GeolocationPosition) => {
       const now = Date.now();
@@ -173,9 +216,9 @@ export default function Sender({ sessionId }: Props) {
       lastGpsUpdate.current = now;
 
       setCoords({ lat, lng, accuracy });
+
       setStatus("online");
 
-      // IMPORTANT FIX: flat structure (tracker compatibility)
       update(sessionRef, {
         lat,
         lng,
@@ -212,14 +255,8 @@ export default function Sender({ sessionId }: Props) {
         clearInterval(heartbeatRef.current);
       }
 
-      if (connectionUnsubRef.current) {
-        connectionUnsubRef.current();
-      }
-
-      if (batteryRef.current?.bat) {
-        const bat = batteryRef.current.bat;
-        bat.removeEventListener("levelchange", batteryRef.current.updateBattery);
-        bat.removeEventListener("chargingchange", batteryRef.current.updateBattery);
+      if (conn?.removeEventListener) {
+        conn.removeEventListener("change", pushNetwork);
       }
 
       update(sessionRef, {
@@ -230,79 +267,56 @@ export default function Sender({ sessionId }: Props) {
   }, [sessionId]);
 
   /* -----------------------------
-     UI
+     DEBUG UI
   ------------------------------*/
   return (
     <div style={styles.container}>
-      <h3 style={styles.title}>📡 Live Sender</h3>
+      <h3>📡 Sender Active</h3>
 
-      <p style={styles.status}>Status: {status.toUpperCase()}</p>
+      <p>Status: {status}</p>
+      <p>Ping: {ping} ms</p>
 
       {coords && (
-        <div style={styles.coords}>
-          <p>Lat: {coords.lat.toFixed(6)}</p>
-          <p>Lng: {coords.lng.toFixed(6)}</p>
-          <p>Accuracy: {Math.round(coords.accuracy)}m</p>
-        </div>
-      )}
-
-      <p style={styles.meta}>Ping: {ping} ms</p>
-
-      {network && (
-        <p style={styles.meta}>
-          Network: {network.type} • {network.downlink}Mbps • RTT {network.rtt}ms
+        <p>
+          GPS: {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}
         </p>
       )}
 
-      {battery && (
-        <p style={styles.meta}>
-          Battery: {Math.round((battery.level || 0) * 100)}%
-          {battery.charging ? " ⚡ charging" : ""}
+      {ipInfo && (
+        <p>
+          🌍 {ipInfo.city}, {ipInfo.country} | ISP: {ipInfo.org}
         </p>
       )}
 
       {device && (
-        <div style={styles.device}>
-          <p>
-            📱 {device.brand} {device.model}
-          </p>
-          <p>
-            {device.os} • {device.browser}
-          </p>
-          <p>{device.type}</p>
-        </div>
+        <p>
+          Device: {device.brand} {device.model}
+        </p>
       )}
 
-      <p style={styles.session}>Session: {sessionId}</p>
+      {network && (
+        <p>
+          Network: {network.type} | {network.downlink}Mbps
+        </p>
+      )}
+
+      {battery && (
+        <p>
+          Battery: {Math.round((battery.level || 0) * 100)}%{" "}
+          {battery.charging ? "⚡ charging" : ""}
+        </p>
+      )}
     </div>
   );
 }
 
-/* -----------------------------
-   STYLES
-------------------------------*/
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    padding: 18,
+    padding: 16,
     background: "#0f172a",
     color: "white",
     borderRadius: 12,
-    maxWidth: 440,
-    margin: "30px auto",
-    textAlign: "center",
-    border: "1px solid rgba(255,255,255,0.08)",
+    maxWidth: 420,
+    margin: "20px auto",
   },
-  title: { fontSize: 18, marginBottom: 10 },
-  status: { fontSize: 14, fontWeight: 600, marginBottom: 10 },
-  coords: { fontSize: 13, opacity: 0.85, marginBottom: 10 },
-  meta: { fontSize: 12, opacity: 0.75, marginBottom: 6 },
-  device: {
-    fontSize: 12,
-    opacity: 0.85,
-    marginTop: 10,
-    padding: 8,
-    background: "#111827",
-    borderRadius: 8,
-  },
-  session: { fontSize: 11, opacity: 0.5, marginTop: 10 },
 };

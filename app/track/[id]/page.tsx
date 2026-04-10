@@ -10,6 +10,8 @@ const LiveMap = dynamic(() => import("@/components/LiveMap"), {
   ssr: false,
 });
 
+/* ---------------- TYPES ---------------- */
+
 type Pos = {
   lat: number;
   lng: number;
@@ -23,6 +25,17 @@ type DeviceInfo = {
   type?: string;
 };
 
+type BatteryInfo = {
+  level?: number;
+  charging?: boolean;
+};
+
+type NetworkInfo = {
+  type?: string;
+  downlink?: number;
+  rtt?: number;
+};
+
 type SessionData = {
   lat?: number;
   lng?: number;
@@ -31,20 +44,31 @@ type SessionData = {
   timestamp?: number;
   pingMs?: number;
   accuracy?: number;
+
   device?: DeviceInfo;
+  battery?: BatteryInfo;
+  network?: NetworkInfo;
 };
+
+/* ---------------- PAGE ---------------- */
 
 export default function TrackPage() {
   const { id } = useParams() as { id: string };
 
   const [pos, setPos] = useState<Pos | null>(null);
-  const [status, setStatus] = useState<"online" | "offline" | "loading">("loading");
+  const [status, setStatus] = useState<"online" | "offline" | "loading">(
+    "loading"
+  );
 
   const [lastSeen, setLastSeen] = useState<number | null>(null);
   const [ping, setPing] = useState<number | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
 
   const [device, setDevice] = useState<DeviceInfo | null>(null);
+  const [battery, setBattery] = useState<BatteryInfo | null>(null);
+  const [network, setNetwork] = useState<NetworkInfo | null>(null);
+
+  /* ---------------- FIREBASE LISTENER ---------------- */
 
   useEffect(() => {
     if (!id) return;
@@ -60,35 +84,25 @@ export default function TrackPage() {
         return;
       }
 
-      // --------------------------
-      // LOCATION
-      // --------------------------
+      /* LOCATION */
       if (typeof data.lat === "number" && typeof data.lng === "number") {
         setPos({ lat: data.lat, lng: data.lng });
       }
 
-      // --------------------------
-      // TIME HANDLING (SAFE)
-      // --------------------------
+      /* TIME */
       const last = data.lastSeen ?? data.timestamp ?? null;
-      if (typeof last === "number") {
-        setLastSeen(last);
-      }
+      if (typeof last === "number") setLastSeen(last);
 
-      // --------------------------
-      // PING / ACCURACY
-      // --------------------------
+      /* METRICS */
       if (typeof data.pingMs === "number") setPing(data.pingMs);
       if (typeof data.accuracy === "number") setAccuracy(data.accuracy);
 
-      // --------------------------
-      // DEVICE
-      // --------------------------
+      /* DEVICE + BATCH DATA */
       setDevice(data.device ?? null);
+      setBattery(data.battery ?? null);
+      setNetwork(data.network ?? null);
 
-      // --------------------------
-      // ONLINE / OFFLINE LOGIC
-      // --------------------------
+      /* ONLINE/OFFLINE */
       const now = Date.now();
       const lastTime = last ?? 0;
 
@@ -101,9 +115,8 @@ export default function TrackPage() {
     return () => unsubscribe();
   }, [id]);
 
-  // --------------------------
-  // CONNECTION STRENGTH
-  // --------------------------
+  /* ---------------- STRENGTH ---------------- */
+
   const getStrength = () => {
     if (status !== "online") return 0;
 
@@ -145,6 +158,8 @@ export default function TrackPage() {
     return `${Math.floor(min / 60)} hr ago`;
   };
 
+  /* ---------------- LOADING ---------------- */
+
   if (!pos) {
     return (
       <div style={styles.loading}>
@@ -154,9 +169,11 @@ export default function TrackPage() {
     );
   }
 
+  /* ---------------- UI ---------------- */
+
   return (
     <div style={styles.page}>
-      {/* LEFT PANEL */}
+      {/* LEFT */}
       <div style={styles.leftPanel}>
         <div style={styles.mapBox}>
           <LiveMap lat={pos.lat} lng={pos.lng} />
@@ -173,7 +190,6 @@ export default function TrackPage() {
           <div style={styles.card}>
             <p>Latitude</p>
             <h3>{pos.lat.toFixed(6)}</h3>
-
             <p style={{ marginTop: 10 }}>Longitude</p>
             <h3>{pos.lng.toFixed(6)}</h3>
           </div>
@@ -206,12 +222,12 @@ export default function TrackPage() {
         </div>
       </div>
 
-      {/* RIGHT PANEL (DASHBOARD FIXED) */}
+      {/* RIGHT */}
       <div style={styles.rightPanel}>
         <h2>📊 Dashboard</h2>
         <p>Session ID: {id}</p>
 
-        {/* DEVICE CARD (CLEAN + SAFE) */}
+        {/* DEVICE CARD (WITH BATTERY INSIDE) */}
         <div style={styles.cardRight}>
           <h3>📱 Device Info</h3>
 
@@ -220,31 +236,52 @@ export default function TrackPage() {
               <p style={{ fontSize: 18 }}>
                 {device.brand ?? "Unknown"} {device.model ?? ""}
               </p>
+
               <p>
                 {device.os ?? "Unknown OS"} • {device.browser ?? "Unknown"}
               </p>
+
               <p style={{ opacity: 0.6 }}>
                 Type: {device.type ?? "Unknown"}
               </p>
+
+              {/* BATTERY INSIDE DEVICE CARD */}
+              <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #374151" }}>
+                <p>
+                  🔋 Battery:{" "}
+                  {battery?.level !== undefined
+                    ? `${Math.round(battery.level * 100)}%`
+                    : "Unknown"}
+                  {battery?.charging ? " ⚡ Charging" : ""}
+                </p>
+              </div>
             </>
           ) : (
-            <p>Waiting for device info...</p>
+            <p>Loading device...</p>
           )}
         </div>
 
-        {/* NETWORK CARD (READY FOR IP API) */}
+        {/* NETWORK CARD */}
         <div style={styles.cardRight}>
           <h3>🌐 Network Info</h3>
-          <p>IP: (ready for API integration)</p>
-          <p>ISP: (ready for API integration)</p>
-          <p>Network: auto-detect later</p>
+
+          {network ? (
+            <>
+              <p>Type: {network.type ?? "unknown"}</p>
+              <p>Speed: {network.downlink ?? "?"} Mbps</p>
+              <p>RTT: {network.rtt ?? "?"} ms</p>
+            </>
+          ) : (
+            <p>Loading network...</p>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-/* 🎨 STYLES */
+/* ---------------- STYLES ---------------- */
+
 const styles: Record<string, React.CSSProperties> = {
   page: {
     display: "flex",
