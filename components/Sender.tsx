@@ -2,80 +2,95 @@
 
 import { useEffect, useRef, useState } from "react";
 import { db } from "@/lib/firebase";
-import {
-  ref,
-  set,
-  onDisconnect,
-  onValue,
-  serverTimestamp,
-} from "firebase/database";
+import { ref, set, onDisconnect, onValue } from "firebase/database";
 
 type Props = {
   sessionId: string;
 };
 
+type Coords = {
+  lat: number;
+  lng: number;
+  accuracy: number;
+};
+
 export default function Sender({ sessionId }: Props) {
   const watchIdRef = useRef<number | null>(null);
-  const lastUpdateRef = useRef<number>(0);
+  const lastGpsUpdate = useRef<number>(0);
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
-  const isMountedRef = useRef(true);
+  const isMounted = useRef(true);
 
   const sessionRef = ref(db, `sessions/${sessionId}`);
   const connectedRef = ref(db, ".info/connected");
 
-  const [status, setStatus] = useState("Initializing...");
-  const [coords, setCoords] = useState<{
-    lat: number;
-    lng: number;
-    accuracy: number;
-  } | null>(null);
+  const [status, setStatus] = useState<
+    "initializing" | "online" | "offline" | "error"
+  >("initializing");
 
+  const [coords, setCoords] = useState<Coords | null>(null);
+  const [ping, setPing] = useState<number>(0);
+
+  /* -------------------------------
+      INIT
+  --------------------------------*/
   useEffect(() => {
-    isMountedRef.current = true;
+    isMounted.current = true;
 
     if (!sessionId || typeof sessionId !== "string") {
-      setStatus("Invalid session ID ❌");
+      setStatus("error");
       return;
     }
 
     if (!navigator.geolocation) {
-      setStatus("Geolocation not supported ❌");
+      setStatus("error");
       return;
     }
 
-    setStatus("Connecting...");
+    setStatus("online");
 
-    // 🟢 PRESENCE SYSTEM (ONLINE / OFFLINE)
+    /* -------------------------------
+       PRESENCE SYSTEM (REAL FIXED)
+    --------------------------------*/
     onValue(connectedRef, (snap) => {
       const isConnected = snap.val();
 
       if (isConnected === true) {
-        set(sessionRef, (prev: any) => ({
-          ...prev,
+        // IMPORTANT: ONLY set presence fields (DO NOT overwrite lat/lng)
+        set(sessionRef, {
           status: "online",
           lastSeen: Date.now(),
-        }));
+        });
 
         onDisconnect(sessionRef).update({
           status: "offline",
           lastSeen: Date.now(),
         });
-
-        if (isMountedRef.current) {
-          setStatus("🟢 Online");
-        }
+      } else {
+        setStatus("offline");
       }
     });
 
-    // 💓 HEARTBEAT SYSTEM (EVERY 15s)
-    heartbeatRef.current = setInterval(() => {
-      set(ref(db, `sessions/${sessionId}`), {
-        lastSeen: Date.now(),
-        status: "online",
-      });
-    }, 15000);
+    /* -------------------------------
+       HEARTBEAT (PING SYSTEM FIXED)
+    --------------------------------*/
+    heartbeatRef.current = setInterval(async () => {
+      const start = Date.now();
 
-    // 📡 GPS TRACKING
+      try {
+        await set(ref(db, `sessions/${sessionId}/heartbeat`), {
+          t: start,
+        });
+
+        const latency = Date.now() - start;
+        setPing(latency);
+      } catch {
+        setPing(999);
+      }
+    }, 10000);
+
+    /* -------------------------------
+       GPS TRACKING (PRIMARY STREAM)
+    --------------------------------*/
     const handleSuccess = (position: GeolocationPosition) => {
       const now = Date.now();
 
@@ -83,57 +98,35 @@ export default function Sender({ sessionId }: Props) {
       const lng = position.coords.longitude;
       const accuracy = position.coords.accuracy;
 
-      if (
-        typeof lat !== "number" ||
-        typeof lng !== "number" ||
-        isNaN(lat) ||
-        isNaN(lng)
-      ) {
-        return;
-      }
+      if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
 
-      // throttle GPS updates
-      if (now - lastUpdateRef.current < 2000) return;
-      lastUpdateRef.current = now;
+      if (now - lastGpsUpdate.current < 2000) return;
+      lastGpsUpdate.current = now;
 
       const payload = {
         lat,
         lng,
         accuracy,
         timestamp: now,
-        lastUpdated: new Date(now).toISOString(),
-        status: "online",
         lastSeen: now,
+        status: "online",
+        ping,
       };
 
-      if (isMountedRef.current) {
+      if (isMounted.current) {
         setCoords({ lat, lng, accuracy });
-        setStatus("🟢 Live tracking");
+        setStatus("online");
       }
 
+      // IMPORTANT: overwrite full session state safely
       set(sessionRef, payload).catch(() => {
-        if (isMountedRef.current) {
-          setStatus("Firebase error ❌");
-        }
+        if (isMounted.current) setStatus("error");
       });
     };
 
-    const handleError = (error: GeolocationPositionError) => {
-      if (!isMountedRef.current) return;
-
-      switch (error.code) {
-        case error.PERMISSION_DENIED:
-          setStatus("Permission denied ❌");
-          break;
-        case error.POSITION_UNAVAILABLE:
-          setStatus("Location unavailable ❌");
-          break;
-        case error.TIMEOUT:
-          setStatus("Timeout ❌");
-          break;
-        default:
-          setStatus("Unknown error ❌");
-      }
+    const handleError = () => {
+      if (!isMounted.current) return;
+      setStatus("offline");
     };
 
     watchIdRef.current = navigator.geolocation.watchPosition(
@@ -146,8 +139,11 @@ export default function Sender({ sessionId }: Props) {
       }
     );
 
+    /* -------------------------------
+       CLEANUP
+    --------------------------------*/
     return () => {
-      isMountedRef.current = false;
+      isMounted.current = false;
 
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
@@ -157,7 +153,6 @@ export default function Sender({ sessionId }: Props) {
         clearInterval(heartbeatRef.current);
       }
 
-      // 🔴 mark offline instantly
       set(sessionRef, {
         status: "offline",
         lastSeen: Date.now(),
@@ -165,27 +160,16 @@ export default function Sender({ sessionId }: Props) {
     };
   }, [sessionId]);
 
-  // ⏱ LAST SEEN FORMATTER
-  const getLastSeenText = (lastSeen?: number) => {
-    if (!lastSeen) return "never";
-
-    const diff = Date.now() - lastSeen;
-
-    const seconds = Math.floor(diff / 1000);
-    const minutes = Math.floor(seconds / 60);
-
-    if (seconds < 10) return "just now";
-    if (seconds < 60) return `${seconds}s ago`;
-    if (minutes < 60) return `${minutes} min ago`;
-
-    return `${Math.floor(minutes / 60)} hr ago`;
-  };
-
+  /* -------------------------------
+      UI
+  --------------------------------*/
   return (
     <div style={styles.container}>
-      <h3 style={styles.title}>📡 Live Sender</h3>
+      <h3 style={styles.title}>📡 Sender</h3>
 
-      <p style={styles.status}>{status}</p>
+      <p style={styles.status}>
+        Status: {status.toUpperCase()}
+      </p>
 
       {coords && (
         <div style={styles.coords}>
@@ -195,20 +179,26 @@ export default function Sender({ sessionId }: Props) {
         </div>
       )}
 
+      <p style={styles.meta}>Ping: {ping} ms</p>
+
       <p style={styles.session}>Session: {sessionId}</p>
     </div>
   );
 }
 
+/* -------------------------------
+   STYLES
+--------------------------------*/
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    padding: 20,
-    background: "#111827",
+    padding: 18,
+    background: "#0f172a",
     color: "white",
     borderRadius: 12,
-    maxWidth: 400,
-    margin: "40px auto",
+    maxWidth: 420,
+    margin: "30px auto",
     textAlign: "center",
+    border: "1px solid rgba(255,255,255,0.08)",
   },
   title: {
     marginBottom: 10,
@@ -217,14 +207,20 @@ const styles: Record<string, React.CSSProperties> = {
   status: {
     marginBottom: 10,
     fontSize: 14,
+    fontWeight: 600,
   },
   coords: {
     fontSize: 13,
-    opacity: 0.8,
+    opacity: 0.85,
+    marginBottom: 10,
+  },
+  meta: {
+    fontSize: 12,
+    opacity: 0.7,
     marginBottom: 10,
   },
   session: {
-    fontSize: 12,
+    fontSize: 11,
     opacity: 0.5,
   },
 };

@@ -15,14 +15,26 @@ type Pos = {
   lng: number;
 };
 
+type SessionData = {
+  lat?: number;
+  lng?: number;
+  status?: "online" | "offline";
+  lastSeen?: number;
+  timestamp?: number;
+  pingMs?: number;
+  accuracy?: number;
+};
+
 export default function TrackPage() {
   const { id } = useParams() as { id: string };
 
   const [pos, setPos] = useState<Pos | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<string | null>(null);
   const [status, setStatus] = useState<"online" | "offline" | "loading">(
     "loading"
   );
+  const [lastSeen, setLastSeen] = useState<number | null>(null);
+  const [ping, setPing] = useState<number | null>(null);
+  const [accuracy, setAccuracy] = useState<number | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -30,34 +42,104 @@ export default function TrackPage() {
     const sessionRef = ref(db, `sessions/${id}`);
 
     const unsubscribe = onValue(sessionRef, (snap) => {
-      const data = snap.val();
+      const data: SessionData = snap.val();
 
-      console.log("🔥 RAW FIREBASE DATA:", data);
+      console.log("🔥 LIVE DATA:", data);
 
-      const lat = data?.lat ?? data?.latitude;
-      const lng = data?.lng ?? data?.longitude;
+      if (!data) {
+        setStatus("offline");
+        return;
+      }
+
+      const lat = data.lat ?? data.lat;
+      const lng = data.lng ?? data.lng;
 
       if (typeof lat === "number" && typeof lng === "number") {
         setPos({ lat, lng });
-        setStatus(data?.status === "offline" ? "offline" : "online");
       }
 
-      if (data?.lastUpdated) {
-        setLastUpdate(data.lastUpdated);
-      } else if (data?.timestamp) {
-        setLastUpdate(new Date(data.timestamp).toISOString());
+      if (typeof data.lastSeen === "number") {
+        setLastSeen(data.lastSeen);
+      } else if (typeof data.timestamp === "number") {
+        setLastSeen(data.timestamp);
+      }
+
+      if (typeof data.pingMs === "number") {
+        setPing(data.pingMs);
+      }
+
+      if (typeof data.accuracy === "number") {
+        setAccuracy(data.accuracy);
+      }
+
+      // 🧠 SMART OFFLINE DETECTION
+      const now = Date.now();
+      const last = data.lastSeen ?? data.timestamp ?? 0;
+
+      const diff = now - last;
+
+      if (data.status === "offline" || diff > 20000) {
+        setStatus("offline");
+      } else {
+        setStatus("online");
       }
     });
 
     return () => unsubscribe();
   }, [id]);
 
+  // 📶 CONNECTION STRENGTH (0–100)
+  const getStrength = () => {
+    if (status !== "online") return 0;
+
+    let score = 100;
+
+    // ping penalty
+    if (ping) {
+      if (ping > 300) score -= 40;
+      else if (ping > 150) score -= 20;
+      else if (ping > 80) score -= 10;
+    }
+
+    // GPS accuracy penalty
+    if (accuracy) {
+      if (accuracy > 100) score -= 30;
+      else if (accuracy > 50) score -= 15;
+    }
+
+    // freshness penalty
+    if (lastSeen) {
+      const diff = Date.now() - lastSeen;
+
+      if (diff > 10000) score -= 20;
+      if (diff > 20000) score -= 40;
+    }
+
+    return Math.max(0, Math.min(100, score));
+  };
+
+  const strength = getStrength();
+
+  const formatLastSeen = () => {
+    if (!lastSeen) return "unknown";
+
+    const diff = Date.now() - lastSeen;
+
+    const sec = Math.floor(diff / 1000);
+    const min = Math.floor(sec / 60);
+
+    if (sec < 10) return "just now";
+    if (sec < 60) return `${sec}s ago`;
+    if (min < 60) return `${min} min ago`;
+
+    return `${Math.floor(min / 60)} hr ago`;
+  };
+
   if (!pos) {
     return (
       <div style={styles.loading}>
         <div style={styles.loadingCard}>
-          <div className="pulseDot" />
-          <h2>Searching for live location...</h2>
+          <h2>📡 Waiting for location...</h2>
           <p>Session: {id}</p>
         </div>
       </div>
@@ -66,79 +148,65 @@ export default function TrackPage() {
 
   return (
     <div style={styles.page}>
-      {/* LEFT PANEL */}
+      {/* MAP */}
       <div style={styles.leftPanel}>
-        {/* MAP */}
         <div style={styles.mapBox}>
           <LiveMap lat={pos.lat} lng={pos.lng} />
         </div>
-
-        {/* STATUS CARD */}
-        <div style={styles.statusCard}>
-          <div style={styles.statusRow}>
-            <span>Status</span>
-            <span
-              style={{
-                color:
-                  status === "online"
-                    ? "#22c55e"
-                    : status === "offline"
-                    ? "#ef4444"
-                    : "#facc15",
-                fontWeight: 600,
-              }}
-            >
-              {status.toUpperCase()}
-            </span>
-          </div>
-        </div>
-
-        {/* LOCATION CARD */}
-        <div style={styles.card}>
-          <h3>📍 Current Location</h3>
-          <div style={styles.grid}>
-            <div>
-              <p className="label">Latitude</p>
-              <p className="value">{pos.lat.toFixed(6)}</p>
-            </div>
-            <div>
-              <p className="label">Longitude</p>
-              <p className="value">{pos.lng.toFixed(6)}</p>
-            </div>
-          </div>
-        </div>
-
-        {/* LAST UPDATE CARD */}
-        <div style={styles.cardAlt}>
-          <h3>⏱ Last Update</h3>
-          <p style={{ opacity: 0.8 }}>
-            {lastUpdate
-              ? new Date(lastUpdate).toLocaleString()
-              : "No timestamp available"}
-          </p>
-        </div>
       </div>
 
-      {/* RIGHT PANEL */}
+      {/* SIDE PANEL */}
       <div style={styles.rightPanel}>
         <h2 style={styles.title}>📊 Tracking Dashboard</h2>
 
-        <div style={styles.metaCard}>
-          <p className="label">Session ID</p>
-          <p className="value">{id}</p>
+        {/* STATUS */}
+        <div style={styles.card}>
+          <p>Status</p>
+          <h3 style={{ color: status === "online" ? "#22c55e" : "#ef4444" }}>
+            {status.toUpperCase()}
+          </h3>
         </div>
 
-        <div style={styles.metaCard}>
-          <p className="label">System</p>
-          <p className="value">Live GPS Stream</p>
+        {/* LOCATION */}
+        <div style={styles.card}>
+          <p>Latitude</p>
+          <h3>{pos.lat.toFixed(6)}</h3>
+
+          <p style={{ marginTop: 10 }}>Longitude</p>
+          <h3>{pos.lng.toFixed(6)}</h3>
         </div>
 
-        <div style={styles.metaCard}>
-          <p className="label">Connection</p>
-          <p className="value">
-            {status === "online" ? "Stable 🟢" : "Disconnected 🔴"}
-          </p>
+        {/* LAST SEEN */}
+        <div style={styles.card}>
+          <p>Last Seen</p>
+          <h3>{formatLastSeen()}</h3>
         </div>
+
+        {/* PING */}
+        <div style={styles.card}>
+          <p>Ping</p>
+          <h3>{ping ? `${ping} ms` : "unknown"}</h3>
+        </div>
+
+        {/* CONNECTION STRENGTH */}
+        <div style={styles.card}>
+          <p>Connection Strength</p>
+          <h3
+            style={{
+              color:
+                strength > 70
+                  ? "#22c55e"
+                  : strength > 40
+                  ? "#facc15"
+                  : "#ef4444",
+            }}
+          >
+            {strength}%
+          </h3>
+        </div>
+
+        {/* SESSION */}
+        <div style={styles.cardSmall}>Session: {id}</div>
       </div>
     </div>
   );
@@ -147,83 +215,43 @@ export default function TrackPage() {
 /* 🎨 STYLES */
 const styles: Record<string, React.CSSProperties> = {
   page: {
-    minHeight: "100vh",
-    background: "radial-gradient(circle at top, #0f172a, #020617)",
-    color: "white",
-    padding: 20,
     display: "flex",
-    gap: 24,
+    height: "100vh",
+    background: "#0b1220",
+    color: "white",
   },
 
   leftPanel: {
-    width: 340,
-    display: "flex",
-    flexDirection: "column",
-    gap: 14,
+    flex: 1,
   },
 
   rightPanel: {
-    flex: 1,
-    padding: 20,
-    background: "rgba(255,255,255,0.03)",
-    border: "1px solid rgba(255,255,255,0.08)",
-    borderRadius: 16,
-    backdropFilter: "blur(10px)",
+    width: 340,
+    padding: 16,
+    background: "#111827",
+    overflowY: "auto",
   },
 
   mapBox: {
-    width: "100%",
-    height: 320,
-    borderRadius: 18,
-    overflow: "hidden",
-    boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
-  },
-
-  statusCard: {
-    padding: 12,
-    borderRadius: 14,
-    background: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.06)",
-  },
-
-  statusRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    fontSize: 14,
-  },
-
-  card: {
-    padding: 14,
-    borderRadius: 14,
-    background: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.06)",
-  },
-
-  cardAlt: {
-    padding: 14,
-    borderRadius: 14,
-    background: "rgba(59,130,246,0.08)",
-    border: "1px solid rgba(59,130,246,0.2)",
-  },
-
-  grid: {
-    display: "flex",
-    justifyContent: "space-between",
-    marginTop: 10,
-  },
-
-  metaCard: {
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 12,
-    background: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.06)",
+    height: "100%",
   },
 
   title: {
-    marginBottom: 20,
-    fontSize: 20,
-    fontWeight: 600,
+    marginBottom: 16,
+  },
+
+  card: {
+    padding: 12,
+    marginBottom: 12,
+    borderRadius: 12,
+    background: "#1f2937",
+  },
+
+  cardSmall: {
+    fontSize: 12,
+    opacity: 0.6,
+    textAlign: "center",
+    marginTop: 10,
   },
 
   loading: {
@@ -231,15 +259,11 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    background: "#020617",
+    background: "#0b1220",
     color: "white",
   },
 
   loadingCard: {
     textAlign: "center",
-    padding: 30,
-    borderRadius: 16,
-    background: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.08)",
   },
 };
