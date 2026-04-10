@@ -2,7 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { db } from "@/lib/firebase";
-import { ref, set } from "firebase/database";
+import {
+  ref,
+  set,
+  onDisconnect,
+  onValue,
+  serverTimestamp,
+} from "firebase/database";
 
 type Props = {
   sessionId: string;
@@ -11,7 +17,11 @@ type Props = {
 export default function Sender({ sessionId }: Props) {
   const watchIdRef = useRef<number | null>(null);
   const lastUpdateRef = useRef<number>(0);
+  const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
   const isMountedRef = useRef(true);
+
+  const sessionRef = ref(db, `sessions/${sessionId}`);
+  const connectedRef = ref(db, ".info/connected");
 
   const [status, setStatus] = useState("Initializing...");
   const [coords, setCoords] = useState<{
@@ -23,22 +33,49 @@ export default function Sender({ sessionId }: Props) {
   useEffect(() => {
     isMountedRef.current = true;
 
-    // 🚨 HARD GUARD: sessionId validation
     if (!sessionId || typeof sessionId !== "string") {
-      console.error("❌ Invalid sessionId:", sessionId);
       setStatus("Invalid session ID ❌");
       return;
     }
-
-    console.log("✅ Sender started for session:", sessionId);
 
     if (!navigator.geolocation) {
       setStatus("Geolocation not supported ❌");
       return;
     }
 
-    setStatus("Requesting location permission...");
+    setStatus("Connecting...");
 
+    // 🟢 PRESENCE SYSTEM (ONLINE / OFFLINE)
+    onValue(connectedRef, (snap) => {
+      const isConnected = snap.val();
+
+      if (isConnected === true) {
+        set(sessionRef, (prev: any) => ({
+          ...prev,
+          status: "online",
+          lastSeen: Date.now(),
+        }));
+
+        onDisconnect(sessionRef).update({
+          status: "offline",
+          lastSeen: Date.now(),
+        });
+
+        if (isMountedRef.current) {
+          setStatus("🟢 Online");
+        }
+      }
+    });
+
+    // 💓 HEARTBEAT SYSTEM (EVERY 15s)
+    heartbeatRef.current = setInterval(() => {
+      set(ref(db, `sessions/${sessionId}`), {
+        lastSeen: Date.now(),
+        status: "online",
+      });
+    }, 15000);
+
+    // 📡 GPS TRACKING
     const handleSuccess = (position: GeolocationPosition) => {
       const now = Date.now();
 
@@ -46,18 +83,16 @@ export default function Sender({ sessionId }: Props) {
       const lng = position.coords.longitude;
       const accuracy = position.coords.accuracy;
 
-      // 🚨 Validate coordinates
       if (
         typeof lat !== "number" ||
         typeof lng !== "number" ||
         isNaN(lat) ||
         isNaN(lng)
       ) {
-        console.warn("⚠️ Invalid coordinates:", { lat, lng });
         return;
       }
 
-      // 🔥 Throttle updates (2 seconds)
+      // throttle GPS updates
       if (now - lastUpdateRef.current < 2000) return;
       lastUpdateRef.current = now;
 
@@ -66,26 +101,24 @@ export default function Sender({ sessionId }: Props) {
         lng,
         accuracy,
         timestamp: now,
+        lastUpdated: new Date(now).toISOString(),
+        status: "online",
+        lastSeen: now,
       };
 
-      // ✅ Update local UI
       if (isMountedRef.current) {
         setCoords({ lat, lng, accuracy });
-        setStatus(`📡 Live tracking (${Math.round(accuracy)}m accuracy)`);
+        setStatus("🟢 Live tracking");
       }
 
-      // 🚀 Write to Firebase (safe path)
-      set(ref(db, `sessions/${sessionId}`), payload).catch((err) => {
-        console.error("❌ Firebase update error:", err);
+      set(sessionRef, payload).catch(() => {
         if (isMountedRef.current) {
-          setStatus("Firebase update failed ❌");
+          setStatus("Firebase error ❌");
         }
       });
     };
 
     const handleError = (error: GeolocationPositionError) => {
-      console.error("❌ GPS Error:", error);
-
       if (!isMountedRef.current) return;
 
       switch (error.code) {
@@ -96,10 +129,10 @@ export default function Sender({ sessionId }: Props) {
           setStatus("Location unavailable ❌");
           break;
         case error.TIMEOUT:
-          setStatus("Location timeout ❌");
+          setStatus("Timeout ❌");
           break;
         default:
-          setStatus("Unknown GPS error ❌");
+          setStatus("Unknown error ❌");
       }
     };
 
@@ -118,14 +151,39 @@ export default function Sender({ sessionId }: Props) {
 
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
-        console.log("🛑 Stopped tracking for session:", sessionId);
       }
+
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current);
+      }
+
+      // 🔴 mark offline instantly
+      set(sessionRef, {
+        status: "offline",
+        lastSeen: Date.now(),
+      });
     };
   }, [sessionId]);
 
+  // ⏱ LAST SEEN FORMATTER
+  const getLastSeenText = (lastSeen?: number) => {
+    if (!lastSeen) return "never";
+
+    const diff = Date.now() - lastSeen;
+
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+
+    if (seconds < 10) return "just now";
+    if (seconds < 60) return `${seconds}s ago`;
+    if (minutes < 60) return `${minutes} min ago`;
+
+    return `${Math.floor(minutes / 60)} hr ago`;
+  };
+
   return (
     <div style={styles.container}>
-      <h3 style={styles.title}>📡 Live Location Sender</h3>
+      <h3 style={styles.title}>📡 Live Sender</h3>
 
       <p style={styles.status}>{status}</p>
 
