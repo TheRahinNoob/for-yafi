@@ -54,32 +54,43 @@ export default function TrackPage() {
 
       if (!data) {
         setStatus("offline");
+        setPos(null);
         return;
       }
 
-      // 📍 LOCATION
+      /* -----------------------------
+         LOCATION
+      ------------------------------*/
       if (typeof data.lat === "number" && typeof data.lng === "number") {
         setPos({ lat: data.lat, lng: data.lng });
       }
 
-      // ⏱ LAST SEEN
-      const last = data.lastSeen ?? data.timestamp;
+      /* -----------------------------
+         LAST SEEN
+      ------------------------------*/
+      const last = data.lastSeen ?? data.timestamp ?? null;
       if (typeof last === "number") {
         setLastSeen(last);
       }
 
-      // 📶 PING + ACCURACY
+      /* -----------------------------
+         PING / ACCURACY
+      ------------------------------*/
       if (typeof data.pingMs === "number") setPing(data.pingMs);
       if (typeof data.accuracy === "number") setAccuracy(data.accuracy);
 
-      // 📱 DEVICE INFO (NEW)
+      /* -----------------------------
+         DEVICE
+      ------------------------------*/
       if (data.device) {
         setDevice(data.device);
       }
 
-      // 🧠 ONLINE/OFFLINE LOGIC
+      /* -----------------------------
+         ONLINE / OFFLINE LOGIC
+      ------------------------------*/
       const now = Date.now();
-      const diff = now - (last ?? 0);
+      const diff = last ? now - last : Infinity;
 
       if (data.status === "offline" || diff > 20000) {
         setStatus("offline");
@@ -91,24 +102,26 @@ export default function TrackPage() {
     return () => unsubscribe();
   }, [id]);
 
-  /* 📶 CONNECTION STRENGTH */
+  /* -----------------------------
+     CONNECTION STRENGTH
+  ------------------------------*/
   const getStrength = () => {
     if (status !== "online") return 0;
 
     let score = 100;
 
-    if (ping) {
+    if (ping !== null) {
       if (ping > 300) score -= 40;
       else if (ping > 150) score -= 20;
       else if (ping > 80) score -= 10;
     }
 
-    if (accuracy) {
+    if (accuracy !== null) {
       if (accuracy > 100) score -= 30;
       else if (accuracy > 50) score -= 15;
     }
 
-    if (lastSeen) {
+    if (lastSeen !== null) {
       const diff = Date.now() - lastSeen;
       if (diff > 10000) score -= 20;
       if (diff > 20000) score -= 40;
@@ -119,6 +132,9 @@ export default function TrackPage() {
 
   const strength = getStrength();
 
+  /* -----------------------------
+     TIME FORMAT
+  ------------------------------*/
   const formatLastSeen = () => {
     if (!lastSeen) return "unknown";
 
@@ -133,6 +149,9 @@ export default function TrackPage() {
     return `${Math.floor(min / 60)} hr ago`;
   };
 
+  /* -----------------------------
+     LOADING STATE
+  ------------------------------*/
   if (!pos) {
     return (
       <div style={styles.loading}>
@@ -153,6 +172,8 @@ export default function TrackPage() {
 
         {/* INFO STACK */}
         <div style={styles.infoStack}>
+
+          {/* STATUS */}
           <div style={styles.card}>
             <p>Status</p>
             <h3 style={{ color: status === "online" ? "#22c55e" : "#ef4444" }}>
@@ -160,6 +181,7 @@ export default function TrackPage() {
             </h3>
           </div>
 
+          {/* LOCATION */}
           <div style={styles.card}>
             <p>Latitude</p>
             <h3>{pos.lat.toFixed(6)}</h3>
@@ -168,16 +190,19 @@ export default function TrackPage() {
             <h3>{pos.lng.toFixed(6)}</h3>
           </div>
 
+          {/* LAST SEEN */}
           <div style={styles.card}>
             <p>Last Seen</p>
             <h3>{formatLastSeen()}</h3>
           </div>
 
+          {/* PING */}
           <div style={styles.card}>
             <p>Ping</p>
-            <h3>{ping ? `${ping} ms` : "unknown"}</h3>
+            <h3>{ping !== null ? `${ping} ms` : "unknown"}</h3>
           </div>
 
+          {/* CONNECTION */}
           <div style={styles.card}>
             <p>Connection Strength</p>
             <h3
@@ -194,14 +219,14 @@ export default function TrackPage() {
             </h3>
           </div>
 
-          {/* 📱 DEVICE INFO (NEW FEATURE) */}
+          {/* DEVICE CARD */}
           <div style={styles.card}>
-            <p>📱 Detected Device</p>
+            <p>📱 Device Info</p>
 
             {device ? (
               <>
                 <h3>
-                  {device.brand ? device.brand + " " : ""}
+                  {device.brand ? `${device.brand} ` : ""}
                   {device.model || "Unknown Device"}
                 </h3>
 
@@ -217,6 +242,14 @@ export default function TrackPage() {
               <h3>Detecting...</h3>
             )}
           </div>
+
+          {/* FUTURE ISP/IP PLACEHOLDER */}
+          <div style={styles.card}>
+            <p>🌐 Network Info (Coming Soon)</p>
+            <h3 style={{ opacity: 0.6 }}>
+              IP / ISP integration pending
+            </h3>
+          </div>
         </div>
       </div>
 
@@ -229,7 +262,9 @@ export default function TrackPage() {
   );
 }
 
-/* 🎨 STYLES */
+/* -----------------------------
+   STYLES
+------------------------------*/
 const styles: Record<string, React.CSSProperties> = {
   page: {
     display: "flex",

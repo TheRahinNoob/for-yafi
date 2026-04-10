@@ -2,12 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { db } from "@/lib/firebase";
-import {
-  ref,
-  update,
-  onDisconnect,
-  onValue,
-} from "firebase/database";
+import { ref, update, onDisconnect, onValue } from "firebase/database";
 
 import { getDeviceInfo, DeviceInfo } from "@/lib/deviceDetector";
 
@@ -19,6 +14,17 @@ type Coords = {
   lat: number;
   lng: number;
   accuracy: number;
+};
+
+type NetworkInfo = {
+  type?: string;
+  downlink?: number;
+  rtt?: number;
+};
+
+type BatteryInfo = {
+  level?: number;
+  charging?: boolean;
 };
 
 export default function Sender({ sessionId }: Props) {
@@ -37,23 +43,23 @@ export default function Sender({ sessionId }: Props) {
   const [coords, setCoords] = useState<Coords | null>(null);
   const [ping, setPing] = useState<number>(0);
   const [device, setDevice] = useState<DeviceInfo | null>(null);
+  const [network, setNetwork] = useState<NetworkInfo | null>(null);
+  const [battery, setBattery] = useState<BatteryInfo | null>(null);
 
+  /* -----------------------------
+     INIT
+  ------------------------------*/
   useEffect(() => {
     isMounted.current = true;
 
-    if (!sessionId) {
+    if (!sessionId || !navigator.geolocation) {
       setStatus("error");
       return;
     }
 
-    if (!navigator.geolocation) {
-      setStatus("error");
-      return;
-    }
-
-    // -----------------------------
-    // DEVICE DETECTION (NEW)
-    // -----------------------------
+    /* -----------------------------
+       DEVICE INFO (ONE TIME)
+    ------------------------------*/
     (async () => {
       const info = await getDeviceInfo();
       setDevice(info);
@@ -63,13 +69,71 @@ export default function Sender({ sessionId }: Props) {
       });
     })();
 
-    // -----------------------------
-    // PRESENCE SYSTEM
-    // -----------------------------
-    const unsubscribeConnection = onValue(connectedRef, (snap) => {
+    /* -----------------------------
+       NETWORK INFO
+    ------------------------------*/
+    const conn =
+      (navigator as any).connection ||
+      (navigator as any).mozConnection ||
+      (navigator as any).webkitConnection;
+
+    if (conn) {
+      const net: NetworkInfo = {
+        type: conn.effectiveType,
+        downlink: conn.downlink,
+        rtt: conn.rtt,
+      };
+
+      setNetwork(net);
+
+      update(sessionRef, {
+        network: net,
+      });
+    }
+
+    /* -----------------------------
+       BATTERY INFO
+    ------------------------------*/
+    if ("getBattery" in navigator) {
+      (navigator as any).getBattery().then((bat: any) => {
+        const info: BatteryInfo = {
+          level: bat.level,
+          charging: bat.charging,
+        };
+
+        setBattery(info);
+
+        update(sessionRef, {
+          battery: info,
+        });
+
+        bat.addEventListener("levelchange", () => {
+          update(sessionRef, {
+            battery: {
+              level: bat.level,
+              charging: bat.charging,
+            },
+          });
+        });
+
+        bat.addEventListener("chargingchange", () => {
+          update(sessionRef, {
+            battery: {
+              level: bat.level,
+              charging: bat.charging,
+            },
+          });
+        });
+      });
+    }
+
+    /* -----------------------------
+       PRESENCE SYSTEM
+    ------------------------------*/
+    const unsubscribe = onValue(connectedRef, (snap) => {
       const connected = snap.val();
 
-      if (connected === true) {
+      if (connected) {
         update(sessionRef, {
           status: "online",
           lastSeen: Date.now(),
@@ -86,9 +150,9 @@ export default function Sender({ sessionId }: Props) {
       }
     });
 
-    // -----------------------------
-    // HEARTBEAT + PING
-    // -----------------------------
+    /* -----------------------------
+       HEARTBEAT / PING
+    ------------------------------*/
     heartbeatRef.current = setInterval(async () => {
       const start = Date.now();
 
@@ -110,15 +174,15 @@ export default function Sender({ sessionId }: Props) {
       }
     }, 8000);
 
-    // -----------------------------
-    // GPS TRACKING
-    // -----------------------------
-    const handleSuccess = (position: GeolocationPosition) => {
+    /* -----------------------------
+       GPS TRACKING
+    ------------------------------*/
+    const handleSuccess = (pos: GeolocationPosition) => {
       const now = Date.now();
 
-      const lat = position.coords.latitude;
-      const lng = position.coords.longitude;
-      const accuracy = position.coords.accuracy;
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const accuracy = pos.coords.accuracy;
 
       if (isNaN(lat) || isNaN(lng)) return;
 
@@ -126,24 +190,21 @@ export default function Sender({ sessionId }: Props) {
       lastGpsUpdate.current = now;
 
       setCoords({ lat, lng, accuracy });
-
       setStatus("online");
 
       update(sessionRef, {
-        lat,
-        lng,
-        accuracy,
+        location: {
+          lat,
+          lng,
+          accuracy,
+        },
         timestamp: now,
         lastSeen: now,
         status: "online",
-      }).catch(() => {
-        setStatus("error");
       });
     };
 
-    const handleError = () => {
-      setStatus("offline");
-    };
+    const handleError = () => setStatus("offline");
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       handleSuccess,
@@ -155,9 +216,9 @@ export default function Sender({ sessionId }: Props) {
       }
     );
 
-    // -----------------------------
-    // CLEANUP
-    // -----------------------------
+    /* -----------------------------
+       CLEANUP
+    ------------------------------*/
     return () => {
       isMounted.current = false;
 
@@ -169,7 +230,7 @@ export default function Sender({ sessionId }: Props) {
         clearInterval(heartbeatRef.current);
       }
 
-      unsubscribeConnection();
+      unsubscribe();
 
       update(sessionRef, {
         status: "offline",
@@ -178,13 +239,14 @@ export default function Sender({ sessionId }: Props) {
     };
   }, [sessionId]);
 
+  /* -----------------------------
+     UI
+  ------------------------------*/
   return (
     <div style={styles.container}>
       <h3 style={styles.title}>📡 Live Sender</h3>
 
-      <p style={styles.status}>
-        Status: {status.toUpperCase()}
-      </p>
+      <p style={styles.status}>Status: {status.toUpperCase()}</p>
 
       {coords && (
         <div style={styles.coords}>
@@ -196,10 +258,27 @@ export default function Sender({ sessionId }: Props) {
 
       <p style={styles.meta}>Ping: {ping} ms</p>
 
+      {network && (
+        <p style={styles.meta}>
+          Network: {network.type} • {network.downlink}Mbps • RTT {network.rtt}ms
+        </p>
+      )}
+
+      {battery && (
+        <p style={styles.meta}>
+          Battery: {Math.round((battery.level || 0) * 100)}%
+          {battery.charging ? " ⚡ charging" : ""}
+        </p>
+      )}
+
       {device && (
         <div style={styles.device}>
-          <p>{device.brand} {device.model}</p>
-          <p>{device.os} • {device.browser}</p>
+          <p>
+            📱 {device.brand} {device.model}
+          </p>
+          <p>
+            {device.os} • {device.browser}
+          </p>
           <p>{device.type}</p>
         </div>
       )}
@@ -209,49 +288,31 @@ export default function Sender({ sessionId }: Props) {
   );
 }
 
-/* -------------------------------
+/* -----------------------------
    STYLES
---------------------------------*/
+------------------------------*/
 const styles: Record<string, React.CSSProperties> = {
   container: {
     padding: 18,
     background: "#0f172a",
     color: "white",
     borderRadius: 12,
-    maxWidth: 420,
+    maxWidth: 440,
     margin: "30px auto",
     textAlign: "center",
     border: "1px solid rgba(255,255,255,0.08)",
   },
-  title: {
-    marginBottom: 10,
-    fontSize: 18,
-  },
-  status: {
-    marginBottom: 10,
-    fontSize: 14,
-    fontWeight: 600,
-  },
-  coords: {
-    fontSize: 13,
-    opacity: 0.85,
-    marginBottom: 10,
-  },
-  meta: {
-    fontSize: 12,
-    opacity: 0.7,
-    marginBottom: 10,
-  },
+  title: { fontSize: 18, marginBottom: 10 },
+  status: { fontSize: 14, fontWeight: 600, marginBottom: 10 },
+  coords: { fontSize: 13, opacity: 0.85, marginBottom: 10 },
+  meta: { fontSize: 12, opacity: 0.75, marginBottom: 6 },
   device: {
     fontSize: 12,
-    opacity: 0.8,
-    marginBottom: 10,
+    opacity: 0.85,
+    marginTop: 10,
     padding: 8,
     background: "#111827",
     borderRadius: 8,
   },
-  session: {
-    fontSize: 11,
-    opacity: 0.5,
-  },
+  session: { fontSize: 11, opacity: 0.5, marginTop: 10 },
 };
