@@ -9,6 +9,8 @@ import {
   onValue,
 } from "firebase/database";
 
+import { getDeviceInfo, DeviceInfo } from "@/lib/deviceDetector";
+
 type Props = {
   sessionId: string;
 };
@@ -34,11 +36,12 @@ export default function Sender({ sessionId }: Props) {
 
   const [coords, setCoords] = useState<Coords | null>(null);
   const [ping, setPing] = useState<number>(0);
+  const [device, setDevice] = useState<DeviceInfo | null>(null);
 
   useEffect(() => {
     isMounted.current = true;
 
-    if (!sessionId || typeof sessionId !== "string") {
+    if (!sessionId) {
       setStatus("error");
       return;
     }
@@ -48,63 +51,68 @@ export default function Sender({ sessionId }: Props) {
       return;
     }
 
-    /* -------------------------------
-       🟢 PRESENCE SYSTEM (SAFE)
-    --------------------------------*/
-    const unsubscribeConnection = onValue(connectedRef, (snap) => {
-      const isConnected = snap.val();
+    // -----------------------------
+    // DEVICE DETECTION (NEW)
+    // -----------------------------
+    (async () => {
+      const info = await getDeviceInfo();
+      setDevice(info);
 
-      if (isConnected === true) {
-        // mark online (merge, not overwrite)
+      update(sessionRef, {
+        device: info,
+      });
+    })();
+
+    // -----------------------------
+    // PRESENCE SYSTEM
+    // -----------------------------
+    const unsubscribeConnection = onValue(connectedRef, (snap) => {
+      const connected = snap.val();
+
+      if (connected === true) {
         update(sessionRef, {
           status: "online",
           lastSeen: Date.now(),
         });
 
-        // auto offline on disconnect
         onDisconnect(sessionRef).update({
           status: "offline",
           lastSeen: Date.now(),
         });
 
-        if (isMounted.current) setStatus("online");
+        setStatus("online");
       } else {
-        if (isMounted.current) setStatus("offline");
+        setStatus("offline");
       }
     });
 
-    /* -------------------------------
-       💓 HEARTBEAT + PING SYSTEM
-    --------------------------------*/
+    // -----------------------------
+    // HEARTBEAT + PING
+    // -----------------------------
     heartbeatRef.current = setInterval(async () => {
       const start = Date.now();
 
       try {
-        // write heartbeat timestamp
         await update(sessionRef, {
           heartbeat: start,
         });
 
-        // calculate latency
         const latency = Date.now() - start;
 
-        if (isMounted.current) {
-          setPing(latency);
-        }
+        setPing(latency);
 
-        // store ping safely
         update(sessionRef, {
           pingMs: latency,
           lastSeen: Date.now(),
         });
       } catch {
-        if (isMounted.current) setPing(999);
+        setPing(999);
       }
     }, 8000);
 
-    /* -------------------------------
-       📡 GPS TRACKING
-    --------------------------------*/
+    // -----------------------------
+    // GPS TRACKING
+    // -----------------------------
     const handleSuccess = (position: GeolocationPosition) => {
       const now = Date.now();
 
@@ -112,23 +120,15 @@ export default function Sender({ sessionId }: Props) {
       const lng = position.coords.longitude;
       const accuracy = position.coords.accuracy;
 
-      if (
-        typeof lat !== "number" ||
-        typeof lng !== "number" ||
-        isNaN(lat) ||
-        isNaN(lng)
-      ) return;
+      if (isNaN(lat) || isNaN(lng)) return;
 
-      // throttle (2s)
       if (now - lastGpsUpdate.current < 2000) return;
       lastGpsUpdate.current = now;
 
-      if (isMounted.current) {
-        setCoords({ lat, lng, accuracy });
-        setStatus("online");
-      }
+      setCoords({ lat, lng, accuracy });
 
-      // ✅ merge ALL data safely
+      setStatus("online");
+
       update(sessionRef, {
         lat,
         lng,
@@ -137,12 +137,11 @@ export default function Sender({ sessionId }: Props) {
         lastSeen: now,
         status: "online",
       }).catch(() => {
-        if (isMounted.current) setStatus("error");
+        setStatus("error");
       });
     };
 
     const handleError = () => {
-      if (!isMounted.current) return;
       setStatus("offline");
     };
 
@@ -156,9 +155,9 @@ export default function Sender({ sessionId }: Props) {
       }
     );
 
-    /* -------------------------------
-       CLEANUP
-    --------------------------------*/
+    // -----------------------------
+    // CLEANUP
+    // -----------------------------
     return () => {
       isMounted.current = false;
 
@@ -172,7 +171,6 @@ export default function Sender({ sessionId }: Props) {
 
       unsubscribeConnection();
 
-      // mark offline safely
       update(sessionRef, {
         status: "offline",
         lastSeen: Date.now(),
@@ -180,12 +178,9 @@ export default function Sender({ sessionId }: Props) {
     };
   }, [sessionId]);
 
-  /* -------------------------------
-      UI
-  --------------------------------*/
   return (
     <div style={styles.container}>
-      <h3 style={styles.title}>📡 Sender</h3>
+      <h3 style={styles.title}>📡 Live Sender</h3>
 
       <p style={styles.status}>
         Status: {status.toUpperCase()}
@@ -199,13 +194,17 @@ export default function Sender({ sessionId }: Props) {
         </div>
       )}
 
-      <p style={styles.meta}>
-        Ping: {ping} ms
-      </p>
+      <p style={styles.meta}>Ping: {ping} ms</p>
 
-      <p style={styles.session}>
-        Session: {sessionId}
-      </p>
+      {device && (
+        <div style={styles.device}>
+          <p>{device.brand} {device.model}</p>
+          <p>{device.os} • {device.browser}</p>
+          <p>{device.type}</p>
+        </div>
+      )}
+
+      <p style={styles.session}>Session: {sessionId}</p>
     </div>
   );
 }
@@ -242,6 +241,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     opacity: 0.7,
     marginBottom: 10,
+  },
+  device: {
+    fontSize: 12,
+    opacity: 0.8,
+    marginBottom: 10,
+    padding: 8,
+    background: "#111827",
+    borderRadius: 8,
   },
   session: {
     fontSize: 11,

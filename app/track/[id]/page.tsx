@@ -15,6 +15,14 @@ type Pos = {
   lng: number;
 };
 
+type DeviceInfo = {
+  model?: string;
+  brand?: string;
+  os?: string;
+  browser?: string;
+  type?: string;
+};
+
 type SessionData = {
   lat?: number;
   lng?: number;
@@ -23,6 +31,7 @@ type SessionData = {
   timestamp?: number;
   pingMs?: number;
   accuracy?: number;
+  device?: DeviceInfo;
 };
 
 export default function TrackPage() {
@@ -33,6 +42,7 @@ export default function TrackPage() {
   const [lastSeen, setLastSeen] = useState<number | null>(null);
   const [ping, setPing] = useState<number | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
+  const [device, setDevice] = useState<DeviceInfo | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -47,23 +57,29 @@ export default function TrackPage() {
         return;
       }
 
+      // 📍 LOCATION
       if (typeof data.lat === "number" && typeof data.lng === "number") {
         setPos({ lat: data.lat, lng: data.lng });
       }
 
-      if (typeof data.lastSeen === "number") {
-        setLastSeen(data.lastSeen);
-      } else if (typeof data.timestamp === "number") {
-        setLastSeen(data.timestamp);
+      // ⏱ LAST SEEN
+      const last = data.lastSeen ?? data.timestamp;
+      if (typeof last === "number") {
+        setLastSeen(last);
       }
 
+      // 📶 PING + ACCURACY
       if (typeof data.pingMs === "number") setPing(data.pingMs);
       if (typeof data.accuracy === "number") setAccuracy(data.accuracy);
 
-      const now = Date.now();
-      const last = data.lastSeen ?? data.timestamp ?? 0;
+      // 📱 DEVICE INFO (NEW)
+      if (data.device) {
+        setDevice(data.device);
+      }
 
-      const diff = now - last;
+      // 🧠 ONLINE/OFFLINE LOGIC
+      const now = Date.now();
+      const diff = now - (last ?? 0);
 
       if (data.status === "offline" || diff > 20000) {
         setStatus("offline");
@@ -130,12 +146,12 @@ export default function TrackPage() {
     <div style={styles.page}>
       {/* LEFT SIDE */}
       <div style={styles.leftPanel}>
-        {/* 🗺️ MAP (SQUARE TOP LEFT) */}
+        {/* MAP */}
         <div style={styles.mapBox}>
           <LiveMap lat={pos.lat} lng={pos.lng} />
         </div>
 
-        {/* 📍 INFO UNDER MAP */}
+        {/* INFO STACK */}
         <div style={styles.infoStack}>
           <div style={styles.card}>
             <p>Status</p>
@@ -177,6 +193,30 @@ export default function TrackPage() {
               {strength}%
             </h3>
           </div>
+
+          {/* 📱 DEVICE INFO (NEW FEATURE) */}
+          <div style={styles.card}>
+            <p>📱 Detected Device</p>
+
+            {device ? (
+              <>
+                <h3>
+                  {device.brand ? device.brand + " " : ""}
+                  {device.model || "Unknown Device"}
+                </h3>
+
+                <p style={{ opacity: 0.7 }}>
+                  {device.os} • {device.browser}
+                </p>
+
+                <p style={{ opacity: 0.5 }}>
+                  {device.type}
+                </p>
+              </>
+            ) : (
+              <h3>Detecting...</h3>
+            )}
+          </div>
         </div>
       </div>
 
@@ -209,10 +249,9 @@ const styles: Record<string, React.CSSProperties> = {
 
   mapBox: {
     width: 320,
-    height: 320, // 🔥 PERFECT SQUARE
+    height: 320,
     borderRadius: 16,
     overflow: "hidden",
-    boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
   },
 
   infoStack: {
