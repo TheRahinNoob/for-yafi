@@ -2,7 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { db } from "@/lib/firebase";
-import { ref, set, onDisconnect, onValue } from "firebase/database";
+import {
+  ref,
+  update,
+  onDisconnect,
+  onValue,
+} from "firebase/database";
 
 type Props = {
   sessionId: string;
@@ -16,8 +21,8 @@ type Coords = {
 
 export default function Sender({ sessionId }: Props) {
   const watchIdRef = useRef<number | null>(null);
-  const lastGpsUpdate = useRef<number>(0);
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
+  const lastGpsUpdate = useRef<number>(0);
   const isMounted = useRef(true);
 
   const sessionRef = ref(db, `sessions/${sessionId}`);
@@ -30,9 +35,6 @@ export default function Sender({ sessionId }: Props) {
   const [coords, setCoords] = useState<Coords | null>(null);
   const [ping, setPing] = useState<number>(0);
 
-  /* -------------------------------
-      INIT
-  --------------------------------*/
   useEffect(() => {
     isMounted.current = true;
 
@@ -46,50 +48,62 @@ export default function Sender({ sessionId }: Props) {
       return;
     }
 
-    setStatus("online");
-
     /* -------------------------------
-       PRESENCE SYSTEM (REAL FIXED)
+       🟢 PRESENCE SYSTEM (SAFE)
     --------------------------------*/
-    onValue(connectedRef, (snap) => {
+    const unsubscribeConnection = onValue(connectedRef, (snap) => {
       const isConnected = snap.val();
 
       if (isConnected === true) {
-        // IMPORTANT: ONLY set presence fields (DO NOT overwrite lat/lng)
-        set(sessionRef, {
+        // mark online (merge, not overwrite)
+        update(sessionRef, {
           status: "online",
           lastSeen: Date.now(),
         });
 
+        // auto offline on disconnect
         onDisconnect(sessionRef).update({
           status: "offline",
           lastSeen: Date.now(),
         });
+
+        if (isMounted.current) setStatus("online");
       } else {
-        setStatus("offline");
+        if (isMounted.current) setStatus("offline");
       }
     });
 
     /* -------------------------------
-       HEARTBEAT (PING SYSTEM FIXED)
+       💓 HEARTBEAT + PING SYSTEM
     --------------------------------*/
     heartbeatRef.current = setInterval(async () => {
       const start = Date.now();
 
       try {
-        await set(ref(db, `sessions/${sessionId}/heartbeat`), {
-          t: start,
+        // write heartbeat timestamp
+        await update(sessionRef, {
+          heartbeat: start,
         });
 
+        // calculate latency
         const latency = Date.now() - start;
-        setPing(latency);
+
+        if (isMounted.current) {
+          setPing(latency);
+        }
+
+        // store ping safely
+        update(sessionRef, {
+          pingMs: latency,
+          lastSeen: Date.now(),
+        });
       } catch {
-        setPing(999);
+        if (isMounted.current) setPing(999);
       }
-    }, 10000);
+    }, 8000);
 
     /* -------------------------------
-       GPS TRACKING (PRIMARY STREAM)
+       📡 GPS TRACKING
     --------------------------------*/
     const handleSuccess = (position: GeolocationPosition) => {
       const now = Date.now();
@@ -98,28 +112,31 @@ export default function Sender({ sessionId }: Props) {
       const lng = position.coords.longitude;
       const accuracy = position.coords.accuracy;
 
-      if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
+      if (
+        typeof lat !== "number" ||
+        typeof lng !== "number" ||
+        isNaN(lat) ||
+        isNaN(lng)
+      ) return;
 
+      // throttle (2s)
       if (now - lastGpsUpdate.current < 2000) return;
       lastGpsUpdate.current = now;
-
-      const payload = {
-        lat,
-        lng,
-        accuracy,
-        timestamp: now,
-        lastSeen: now,
-        status: "online",
-        ping,
-      };
 
       if (isMounted.current) {
         setCoords({ lat, lng, accuracy });
         setStatus("online");
       }
 
-      // IMPORTANT: overwrite full session state safely
-      set(sessionRef, payload).catch(() => {
+      // ✅ merge ALL data safely
+      update(sessionRef, {
+        lat,
+        lng,
+        accuracy,
+        timestamp: now,
+        lastSeen: now,
+        status: "online",
+      }).catch(() => {
         if (isMounted.current) setStatus("error");
       });
     };
@@ -153,7 +170,10 @@ export default function Sender({ sessionId }: Props) {
         clearInterval(heartbeatRef.current);
       }
 
-      set(sessionRef, {
+      unsubscribeConnection();
+
+      // mark offline safely
+      update(sessionRef, {
         status: "offline",
         lastSeen: Date.now(),
       });
@@ -179,9 +199,13 @@ export default function Sender({ sessionId }: Props) {
         </div>
       )}
 
-      <p style={styles.meta}>Ping: {ping} ms</p>
+      <p style={styles.meta}>
+        Ping: {ping} ms
+      </p>
 
-      <p style={styles.session}>Session: {sessionId}</p>
+      <p style={styles.session}>
+        Session: {sessionId}
+      </p>
     </div>
   );
 }

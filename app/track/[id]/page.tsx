@@ -29,9 +29,7 @@ export default function TrackPage() {
   const { id } = useParams() as { id: string };
 
   const [pos, setPos] = useState<Pos | null>(null);
-  const [status, setStatus] = useState<"online" | "offline" | "loading">(
-    "loading"
-  );
+  const [status, setStatus] = useState<"online" | "offline" | "loading">("loading");
   const [lastSeen, setLastSeen] = useState<number | null>(null);
   const [ping, setPing] = useState<number | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
@@ -44,18 +42,13 @@ export default function TrackPage() {
     const unsubscribe = onValue(sessionRef, (snap) => {
       const data: SessionData = snap.val();
 
-      console.log("🔥 LIVE DATA:", data);
-
       if (!data) {
         setStatus("offline");
         return;
       }
 
-      const lat = data.lat ?? data.lat;
-      const lng = data.lng ?? data.lng;
-
-      if (typeof lat === "number" && typeof lng === "number") {
-        setPos({ lat, lng });
+      if (typeof data.lat === "number" && typeof data.lng === "number") {
+        setPos({ lat: data.lat, lng: data.lng });
       }
 
       if (typeof data.lastSeen === "number") {
@@ -64,15 +57,9 @@ export default function TrackPage() {
         setLastSeen(data.timestamp);
       }
 
-      if (typeof data.pingMs === "number") {
-        setPing(data.pingMs);
-      }
+      if (typeof data.pingMs === "number") setPing(data.pingMs);
+      if (typeof data.accuracy === "number") setAccuracy(data.accuracy);
 
-      if (typeof data.accuracy === "number") {
-        setAccuracy(data.accuracy);
-      }
-
-      // 🧠 SMART OFFLINE DETECTION
       const now = Date.now();
       const last = data.lastSeen ?? data.timestamp ?? 0;
 
@@ -88,29 +75,25 @@ export default function TrackPage() {
     return () => unsubscribe();
   }, [id]);
 
-  // 📶 CONNECTION STRENGTH (0–100)
+  /* 📶 CONNECTION STRENGTH */
   const getStrength = () => {
     if (status !== "online") return 0;
 
     let score = 100;
 
-    // ping penalty
     if (ping) {
       if (ping > 300) score -= 40;
       else if (ping > 150) score -= 20;
       else if (ping > 80) score -= 10;
     }
 
-    // GPS accuracy penalty
     if (accuracy) {
       if (accuracy > 100) score -= 30;
       else if (accuracy > 50) score -= 15;
     }
 
-    // freshness penalty
     if (lastSeen) {
       const diff = Date.now() - lastSeen;
-
       if (diff > 10000) score -= 20;
       if (diff > 20000) score -= 40;
     }
@@ -124,7 +107,6 @@ export default function TrackPage() {
     if (!lastSeen) return "unknown";
 
     const diff = Date.now() - lastSeen;
-
     const sec = Math.floor(diff / 1000);
     const min = Math.floor(sec / 60);
 
@@ -138,75 +120,70 @@ export default function TrackPage() {
   if (!pos) {
     return (
       <div style={styles.loading}>
-        <div style={styles.loadingCard}>
-          <h2>📡 Waiting for location...</h2>
-          <p>Session: {id}</p>
-        </div>
+        <h2>📡 Waiting for location...</h2>
+        <p>Session: {id}</p>
       </div>
     );
   }
 
   return (
     <div style={styles.page}>
-      {/* MAP */}
+      {/* LEFT SIDE */}
       <div style={styles.leftPanel}>
+        {/* 🗺️ MAP (SQUARE TOP LEFT) */}
         <div style={styles.mapBox}>
           <LiveMap lat={pos.lat} lng={pos.lng} />
         </div>
+
+        {/* 📍 INFO UNDER MAP */}
+        <div style={styles.infoStack}>
+          <div style={styles.card}>
+            <p>Status</p>
+            <h3 style={{ color: status === "online" ? "#22c55e" : "#ef4444" }}>
+              {status.toUpperCase()}
+            </h3>
+          </div>
+
+          <div style={styles.card}>
+            <p>Latitude</p>
+            <h3>{pos.lat.toFixed(6)}</h3>
+
+            <p style={{ marginTop: 10 }}>Longitude</p>
+            <h3>{pos.lng.toFixed(6)}</h3>
+          </div>
+
+          <div style={styles.card}>
+            <p>Last Seen</p>
+            <h3>{formatLastSeen()}</h3>
+          </div>
+
+          <div style={styles.card}>
+            <p>Ping</p>
+            <h3>{ping ? `${ping} ms` : "unknown"}</h3>
+          </div>
+
+          <div style={styles.card}>
+            <p>Connection Strength</p>
+            <h3
+              style={{
+                color:
+                  strength > 70
+                    ? "#22c55e"
+                    : strength > 40
+                    ? "#facc15"
+                    : "#ef4444",
+              }}
+            >
+              {strength}%
+            </h3>
+          </div>
+        </div>
       </div>
 
-      {/* SIDE PANEL */}
+      {/* RIGHT PANEL */}
       <div style={styles.rightPanel}>
-        <h2 style={styles.title}>📊 Tracking Dashboard</h2>
-
-        {/* STATUS */}
-        <div style={styles.card}>
-          <p>Status</p>
-          <h3 style={{ color: status === "online" ? "#22c55e" : "#ef4444" }}>
-            {status.toUpperCase()}
-          </h3>
-        </div>
-
-        {/* LOCATION */}
-        <div style={styles.card}>
-          <p>Latitude</p>
-          <h3>{pos.lat.toFixed(6)}</h3>
-
-          <p style={{ marginTop: 10 }}>Longitude</p>
-          <h3>{pos.lng.toFixed(6)}</h3>
-        </div>
-
-        {/* LAST SEEN */}
-        <div style={styles.card}>
-          <p>Last Seen</p>
-          <h3>{formatLastSeen()}</h3>
-        </div>
-
-        {/* PING */}
-        <div style={styles.card}>
-          <p>Ping</p>
-          <h3>{ping ? `${ping} ms` : "unknown"}</h3>
-        </div>
-
-        {/* CONNECTION STRENGTH */}
-        <div style={styles.card}>
-          <p>Connection Strength</p>
-          <h3
-            style={{
-              color:
-                strength > 70
-                  ? "#22c55e"
-                  : strength > 40
-                  ? "#facc15"
-                  : "#ef4444",
-            }}
-          >
-            {strength}%
-          </h3>
-        </div>
-
-        {/* SESSION */}
-        <div style={styles.cardSmall}>Session: {id}</div>
+        <h2>📊 Dashboard</h2>
+        <p>Session ID: {id}</p>
       </div>
     </div>
   );
@@ -219,51 +196,51 @@ const styles: Record<string, React.CSSProperties> = {
     height: "100vh",
     background: "#0b1220",
     color: "white",
+    padding: 16,
+    gap: 20,
   },
 
   leftPanel: {
-    flex: 1,
-  },
-
-  rightPanel: {
-    width: 340,
-    padding: 16,
-    background: "#111827",
-    overflowY: "auto",
+    width: 320,
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
   },
 
   mapBox: {
-    height: "100%",
+    width: 320,
+    height: 320, // 🔥 PERFECT SQUARE
+    borderRadius: 16,
+    overflow: "hidden",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
   },
 
-  title: {
-    marginBottom: 16,
+  infoStack: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+
+  rightPanel: {
+    flex: 1,
+    padding: 20,
+    background: "#111827",
+    borderRadius: 16,
   },
 
   card: {
     padding: 12,
-    marginBottom: 12,
     borderRadius: 12,
     background: "#1f2937",
-  },
-
-  cardSmall: {
-    fontSize: 12,
-    opacity: 0.6,
-    textAlign: "center",
-    marginTop: 10,
   },
 
   loading: {
     height: "100vh",
     display: "flex",
+    flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
     background: "#0b1220",
     color: "white",
-  },
-
-  loadingCard: {
-    textAlign: "center",
   },
 };
