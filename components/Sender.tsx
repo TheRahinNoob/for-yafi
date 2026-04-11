@@ -1,3 +1,19 @@
+/**
+ * ██████████████████████████████████████████████████████████████
+ * SENDER COMPONENT – LIVE TRACKER (v2.0 – Final Sophisticated Version)
+ * 
+ * This is the frontend that runs on the user's phone/browser.
+ * It now sends connection hints (cellular/wifi/4g/5g) to the API.
+ * 
+ * WiFi Behaviour:
+ *   → SIM detection confidence will be very low
+ *   → Method will clearly say "wifi_detected_low_confidence"
+ * 
+ * Mobile Data Behaviour:
+ *   → High confidence + correct carrier name
+ * ██████████████████████████████████████████████████████████████
+ */
+
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -65,39 +81,41 @@ export default function Sender({ sessionId }: Props) {
   const [battery, setBattery] = useState<BatteryInfo | null>(null);
   const [sim, setSim] = useState<SimInfo | null>(null);
 
-  /* ---------------- FETCH ISP + SIM ---------------- */
+  /* ---------------- FETCH ISP + SIM WITH CONNECTION HINTS ---------------- */
+  const fetchNetworkData = async (connectionType = "unknown", effectiveType = "unknown") => {
+    try {
+      const params = new URLSearchParams({
+        connectionType,
+        effectiveType,
+      }).toString();
 
-const fetchNetworkData = async () => {
-  try {
-    const res = await fetch("/api/isp", {
-      cache: "no-store",
-    });
+      const res = await fetch(`/api/isp?${params}`, {
+        cache: "no-store",
+      });
 
-    if (!res.ok) throw new Error("ISP API failed");
-
-    return await res.json();
-  } catch (err) {
-    console.error("ISP fetch failed:", err);
-    return null;
-  }
-};
+      if (!res.ok) throw new Error("ISP API failed");
+      return await res.json();
+    } catch (err) {
+      console.error("ISP fetch failed:", err);
+      return null;
+    }
+  };
 
   /* ---------------- INIT ---------------- */
-
   useEffect(() => {
     if (!sessionId || !navigator.geolocation) {
       setStatus("error");
       return;
     }
 
-    /* DEVICE */
+    /* DEVICE INFO */
     (async () => {
       const info = await getDeviceInfo();
       setDevice(info);
       update(sessionRef, { device: info });
     })();
 
-    /* NETWORK BASE */
+    /* NETWORK BASE INFO (Connection API) */
     const conn =
       (navigator as any).connection ||
       (navigator as any).mozConnection ||
@@ -113,9 +131,12 @@ const fetchNetworkData = async () => {
 
     setNetwork(baseNetwork);
 
-    /* ISP + SIM */
+    /* ISP + SIM DETECTION (with WiFi/Mobile hints) */
     const runNetwork = async () => {
-      const data = await fetchNetworkData();
+      const data = await fetchNetworkData(
+        conn?.type || "unknown",
+        conn?.effectiveType || "unknown"
+      );
 
       if (!data) return;
 
@@ -147,7 +168,6 @@ const fetchNetworkData = async () => {
 
     /* BATTERY */
     const nav = navigator as any;
-
     if (nav.getBattery) {
       nav.getBattery().then((bat: any) => {
         const pushBattery = () => {
@@ -155,58 +175,40 @@ const fetchNetworkData = async () => {
             level: bat.level,
             charging: bat.charging,
           };
-
           setBattery(info);
           update(sessionRef, { battery: info });
         };
-
         pushBattery();
         bat.addEventListener("levelchange", pushBattery);
         bat.addEventListener("chargingchange", pushBattery);
       });
     }
 
-    /* PRESENCE */
+    /* PRESENCE + HEARTBEAT + GPS (unchanged) */
     onValue(connectedRef, (snap) => {
       if (snap.val()) {
-        update(sessionRef, {
-          status: "online",
-          lastSeen: Date.now(),
-        });
-
-        onDisconnect(sessionRef).update({
-          status: "offline",
-          lastSeen: Date.now(),
-        });
-
+        update(sessionRef, { status: "online", lastSeen: Date.now() });
+        onDisconnect(sessionRef).update({ status: "offline", lastSeen: Date.now() });
         setStatus("online");
       } else {
         setStatus("offline");
       }
     });
 
-    /* HEARTBEAT */
     heartbeatRef.current = setInterval(async () => {
       const start = Date.now();
-
       try {
         await update(sessionRef, { heartbeat: start });
         setPing(Date.now() - start);
-
-        update(sessionRef, {
-          pingMs: Date.now() - start,
-          lastSeen: Date.now(),
-        });
+        update(sessionRef, { pingMs: Date.now() - start, lastSeen: Date.now() });
       } catch {
         setPing(999);
       }
     }, 8000);
 
-    /* GPS */
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         const now = Date.now();
-
         if (now - lastGpsUpdate.current < 2000) return;
         lastGpsUpdate.current = now;
 
@@ -230,21 +232,13 @@ const fetchNetworkData = async () => {
 
     /* CLEANUP */
     return () => {
-      if (watchIdRef.current)
-        navigator.geolocation.clearWatch(watchIdRef.current);
-
-      if (heartbeatRef.current)
-        clearInterval(heartbeatRef.current);
-
-      update(sessionRef, {
-        status: "offline",
-        lastSeen: Date.now(),
-      });
+      if (watchIdRef.current) navigator.geolocation.clearWatch(watchIdRef.current);
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+      update(sessionRef, { status: "offline", lastSeen: Date.now() });
     };
   }, [sessionId]);
 
   /* ---------------- UI ---------------- */
-
   return (
     <div style={styles.container}>
       <h3>📡 Live Sender</h3>
@@ -263,7 +257,6 @@ const fetchNetworkData = async () => {
           <p>IP: {network.ipInfo.ip}</p>
           <p>City: {network.ipInfo.city}</p>
           <p>Country: {network.ipInfo.country}</p>
-
           <p style={{ fontWeight: 600 }}>
             ISP: {network.isp}
           </p>
@@ -276,7 +269,8 @@ const fetchNetworkData = async () => {
             SIM: {sim.carrier}
           </p>
           <p style={{ opacity: 0.7 }}>
-            Confidence: {sim.confidence}
+            Confidence: {sim.confidence}% 
+            {sim.method && <span style={{ fontSize: "0.8em", marginLeft: 8 }}>({sim.method})</span>}
           </p>
         </div>
       )}

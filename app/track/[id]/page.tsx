@@ -1,3 +1,12 @@
+/**
+ * ██████████████████████████████████████████████████████████████
+ * TRACKER PAGE – LIVE SESSION VIEW (v2.0 – Fully Adapted)
+ * 
+ * Now includes SIM Carrier detection with confidence and method.
+ * Clearly shows when user is on WiFi (low confidence) vs Mobile Data.
+ * ██████████████████████████████████████████████████████████████
+ */
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -46,6 +55,12 @@ type NetworkInfo = {
   ipInfo?: IPInfo;
 };
 
+type SimInfo = {
+  carrier?: string;
+  confidence?: number;
+  method?: string;
+};
+
 type SessionData = {
   lat?: number;
   lng?: number;
@@ -57,6 +72,7 @@ type SessionData = {
   device?: DeviceInfo;
   battery?: BatteryInfo;
   network?: NetworkInfo;
+  sim?: SimInfo;           // ← New: SIM data from Sender
 };
 
 /* ---------------- PAGE ---------------- */
@@ -74,6 +90,7 @@ export default function TrackPage() {
   const [device, setDevice] = useState<DeviceInfo | null>(null);
   const [battery, setBattery] = useState<BatteryInfo | null>(null);
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
+  const [sim, setSim] = useState<SimInfo | null>(null);   // ← New state for SIM
 
   /* ---------------- FIREBASE LISTENER ---------------- */
   useEffect(() => {
@@ -103,10 +120,11 @@ export default function TrackPage() {
       if (typeof data.pingMs === "number") setPing(data.pingMs);
       if (typeof data.accuracy === "number") setAccuracy(data.accuracy);
 
-      /* DEVICE / BATTERY / NETWORK */
+      /* DEVICE / BATTERY / NETWORK / SIM */
       setDevice(data.device ?? null);
       setBattery(data.battery ?? null);
       setNetwork(data.network ?? null);
+      setSim(data.sim ?? null);                    // ← New: Read SIM data
 
       /* ONLINE/OFFLINE LOGIC */
       const now = Date.now();
@@ -277,8 +295,7 @@ export default function TrackPage() {
               <div style={styles.subSection}>
                 <p style={{ fontWeight: 600 }}>🌍 ISP Information</p>
                 <p>
-                  <strong>ISP:</strong>{" "}
-                  {ipInfo?.org ?? "Detecting..."}
+                  <strong>ISP:</strong> {ipInfo?.org ?? "Detecting..."}
                 </p>
                 <p>
                   <strong>City:</strong> {ipInfo?.city ?? "Unknown"}
@@ -298,6 +315,58 @@ export default function TrackPage() {
             </>
           ) : (
             <p>Loading network info...</p>
+          )}
+        </div>
+
+        {/* NEW: SIM CARRIER DETECTION */}
+        <div style={styles.cardRight}>
+          <h3>📶 SIM Carrier Detection</h3>
+          {sim && sim.carrier ? (
+            <>
+              <p style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>
+                {sim.carrier}
+              </p>
+              
+              <div style={{ 
+                display: "flex", 
+                alignItems: "center", 
+                gap: 12, 
+                marginTop: 12 
+              }}>
+                <div style={{
+                  background: sim.confidence && sim.confidence > 60 ? "#22c55e" : 
+                              sim.confidence && sim.confidence > 30 ? "#eab308" : "#ef4444",
+                  color: "white",
+                  padding: "4px 12px",
+                  borderRadius: 999,
+                  fontSize: 14,
+                  fontWeight: 600
+                }}>
+                  Confidence: {sim.confidence ?? 0}%
+                </div>
+              </div>
+
+              {sim.method && (
+                <p style={{ 
+                  marginTop: 12, 
+                  fontSize: 13, 
+                  opacity: 0.75,
+                  wordBreak: "break-all"
+                }}>
+                  Method: <span style={{ fontFamily: "monospace" }}>{sim.method}</span>
+                </p>
+              )}
+
+              <div style={styles.subSection}>
+                <p style={{ fontSize: 13, opacity: 0.7 }}>
+                  {sim.confidence && sim.confidence < 25 
+                    ? "⚠️ User is likely on WiFi. Switch to mobile data for accurate SIM detection." 
+                    : "✅ Detection running on mobile network"}
+                </p>
+              </div>
+            </>
+          ) : (
+            <p>Waiting for SIM detection...</p>
           )}
         </div>
       </div>
