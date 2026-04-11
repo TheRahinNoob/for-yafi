@@ -1,9 +1,10 @@
 /**
  * ██████████████████████████████████████████████████████████████
- * DEVICE DETECTOR – ULTRA SPY GRADE EDITION (v5.4)
+ * DEVICE DETECTOR – ULTRA SPY GRADE EDITION (v5.6)
  * 
- * Fixed: RAM now clearly marked as APPROXIMATE (privacy limitation)
- * Samsung + MediaTek CPU already perfect
+ * UPDATED: Live gyroscope helper (startLiveOrientation) added
+ * Keeps 100% of your v5.5 code + one-shot gyro + all previous fixes
+ * Samsung brand, MediaTek CPU, RAM approx, fingerprints, everything preserved
  * Fully TypeScript-error-free
  * ██████████████████████████████████████████████████████████████
  */
@@ -24,8 +25,8 @@ export type DeviceInfo = {
 
   // Hardware
   cpuCores?: number;
-  ramGB?: number;           // ← now approximate (see ramGBApprox)
-  ramGBApprox?: boolean;    // ← NEW: tells frontend it's not exact
+  ramGB?: number;
+  ramGBApprox?: boolean;
   cpuModelHint?: string;
   webGLVendor?: string;
   webGLRenderer?: string;
@@ -65,6 +66,12 @@ export type DeviceInfo = {
   isStandalone?: boolean;
   isMobileApp?: boolean;
 
+  // 🔥 GYROSCOPE / HOLDING ANGLE
+  orientationAlpha?: number;      // 0–360° compass
+  orientationBeta?: number;       // front/back tilt
+  orientationGamma?: number;      // left/right tilt
+  orientationAbsolute?: boolean;
+
   // Ultra Spy Fingerprints
   canvasFingerprint?: string;
   webglFingerprint?: string;
@@ -84,6 +91,95 @@ function simpleHash(str: string): string {
     hash = hash & hash;
   }
   return Math.abs(hash).toString(36).padStart(8, "0");
+}
+
+/* ==================== GET CURRENT GYRO ORIENTATION (one-shot) ==================== */
+async function getCurrentOrientation(): Promise<{
+  alpha?: number;
+  beta?: number;
+  gamma?: number;
+  absolute?: boolean;
+}> {
+  return new Promise((resolve) => {
+    if (!("DeviceOrientationEvent" in window)) {
+      return resolve({});
+    }
+
+    let resolved = false;
+
+    const handleOrientation = (event: DeviceOrientationEvent) => {
+      if (resolved) return;
+      resolved = true;
+      window.removeEventListener("deviceorientation", handleOrientation);
+      resolve({
+        alpha: event.alpha ?? undefined,
+        beta: event.beta ?? undefined,
+        gamma: event.gamma ?? undefined,
+        absolute: event.absolute ?? undefined,
+      });
+    };
+
+    // iOS 13+ permission request (must be triggered by user gesture in real usage)
+    const requestPermissionIfNeeded = async () => {
+      const anyEvent = DeviceOrientationEvent as any;
+      if (typeof anyEvent.requestPermission === "function") {
+        try {
+          const permission = await anyEvent.requestPermission();
+          if (permission !== "granted") return resolve({});
+        } catch {
+          return resolve({});
+        }
+      }
+      window.addEventListener("deviceorientation", handleOrientation, { once: true });
+    };
+
+    requestPermissionIfNeeded().catch(() => resolve({}));
+  });
+}
+
+/* ==================== LIVE ORIENTATION HELPER (new in v5.6) ==================== */
+export function startLiveOrientation(
+  callback: (data: {
+    alpha?: number;
+    beta?: number;
+    gamma?: number;
+    absolute?: boolean;
+  }) => void
+) {
+  if (!("DeviceOrientationEvent" in window)) return () => {};
+
+  let lastSent = Date.now();
+
+  const handler = (event: DeviceOrientationEvent) => {
+    const now = Date.now();
+    if (now - lastSent < 300) return; // throttle to ~3 updates/sec (smooth + battery friendly)
+
+    lastSent = now;
+    callback({
+      alpha: event.alpha ?? undefined,
+      beta: event.beta ?? undefined,
+      gamma: event.gamma ?? undefined,
+      absolute: event.absolute ?? undefined,
+    });
+  };
+
+  // iOS 13+ permission
+  const requestPermission = async () => {
+    const anyEvent = DeviceOrientationEvent as any;
+    if (typeof anyEvent.requestPermission === "function") {
+      try {
+        const perm = await anyEvent.requestPermission();
+        if (perm !== "granted") return;
+      } catch {}
+    }
+    window.addEventListener("deviceorientation", handler);
+  };
+
+  requestPermission();
+
+  return () => {
+    window.removeEventListener("deviceorientation", handler);
+  };
 }
 
 export async function getDeviceInfo(): Promise<DeviceInfo> {
@@ -150,14 +246,13 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       else if (modelLower.includes("pixel")) info.brand = "Google";
     }
 
-    /* ==================== 4. HARDWARE (RAM now marked approximate) ==================== */
+    /* ==================== 4. HARDWARE ==================== */
     info.cpuCores = nav.hardwareConcurrency || undefined;
     if (nav.deviceMemory) {
       info.ramGB = nav.deviceMemory;
-      info.ramGBApprox = true;          // ← tells your UI it's approximate
+      info.ramGBApprox = true;
     }
 
-    // Smart CPU detection (already fixed in v5.3)
     if (ua.includes("Intel")) info.cpuModelHint = "Intel";
     else if (ua.includes("AMD")) info.cpuModelHint = "AMD";
     else if (info.os.toLowerCase().includes("android")) {
@@ -237,7 +332,14 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       info.type = "Desktop";
     }
 
-    /* ==================== 11. FINGERPRINTS ==================== */
+    /* ==================== 11. 🔥 GYROSCOPE / HOLDING ANGLE (one-shot) ==================== */
+    const gyro = await getCurrentOrientation();
+    info.orientationAlpha = gyro.alpha;
+    info.orientationBeta = gyro.beta;
+    info.orientationGamma = gyro.gamma;
+    info.orientationAbsolute = gyro.absolute;
+
+    /* ==================== 12. FINGERPRINTS ==================== */
     try {
       const c = document.createElement("canvas");
       const ctx = c.getContext("2d");
@@ -273,10 +375,10 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       info.audioFingerprint = simpleHash(audioHash);
     } catch {}
 
-    /* ==================== 12. RAW UA ==================== */
+    /* ==================== 13. RAW UA ==================== */
     info.userAgent = ua.substring(0, 300);
 
-    console.info("🕵️‍♂️ [DEVICE DETECTOR v5.4] Full Profile Captured:", info);
+    console.info("🕵️‍♂️ [DEVICE DETECTOR v5.6] Full Profile Captured (with live gyro support):", info);
   } catch (err) {
     console.warn("❌ Device detection failed partially:", err);
   }

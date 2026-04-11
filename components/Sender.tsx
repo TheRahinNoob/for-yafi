@@ -1,12 +1,11 @@
 /**
  * ██████████████████████████████████████████████████████████████
- * SENDER COMPONENT – LIVE TRACKER (v5.0 – Ultra Spy Grade)
+ * SENDER COMPONENT – LIVE TRACKER (v6.0 – Ultra Spy Grade)
  * 
- * Fully compatible with deviceDetector.ts v5.1 (Maximum Intelligence)
- * Sends ALL spy-grade data (fingerprints, HDR, GPU, etc.) to Firebase
- * 
- * WiFi → Low confidence SIM
- * Mobile Data → High confidence + correct carrier
+ * FULLY UPDATED WITH LIVE GYROSCOPE
+ * Compatible with deviceDetector.ts v5.6
+ * Sends: Device Info + Live Orientation (beta/gamma/alpha) + all previous spy features
+ * Firebase real-time updates + proper cleanup
  * ██████████████████████████████████████████████████████████████
  */
 
@@ -15,7 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import { db } from "@/lib/firebase";
 import { ref, update, onDisconnect, onValue } from "firebase/database";
-import { getDeviceInfo, DeviceInfo } from "@/lib/deviceDetector";
+import { getDeviceInfo, startLiveOrientation, type DeviceInfo } from "@/lib/deviceDetector";
 
 /* ---------------- TYPES ---------------- */
 
@@ -53,6 +52,13 @@ type NetworkInfo = {
   ipInfo?: IPInfo;
 };
 
+type OrientationData = {
+  alpha?: number;
+  beta?: number;
+  gamma?: number;
+  timestamp: number;
+};
+
 type Props = {
   sessionId: string;
 };
@@ -61,6 +67,7 @@ export default function Sender({ sessionId }: Props) {
   const watchIdRef = useRef<number | null>(null);
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
   const lastGpsUpdate = useRef<number>(0);
+  const stopLiveOrientationRef = useRef<(() => void) | null>(null); // ← NEW: Gyro cleanup
 
   const sessionRef = ref(db, `sessions/${sessionId}`);
   const connectedRef = ref(db, ".info/connected");
@@ -76,6 +83,7 @@ export default function Sender({ sessionId }: Props) {
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
   const [battery, setBattery] = useState<BatteryInfo | null>(null);
   const [sim, setSim] = useState<SimInfo | null>(null);
+  const [gyroActive, setGyroActive] = useState(false); // ← NEW: Visual feedback
 
   /* ---------------- FETCH ISP + SIM ---------------- */
   const fetchNetworkData = async (connectionType = "unknown", effectiveType = "unknown") => {
@@ -97,7 +105,7 @@ export default function Sender({ sessionId }: Props) {
       return;
     }
 
-    /* DEVICE INFO – ULTRA SPY GRADE */
+    /* 1. DEVICE INFO – ULTRA SPY GRADE (one-shot) */
     (async () => {
       try {
         const info = await getDeviceInfo();
@@ -108,7 +116,25 @@ export default function Sender({ sessionId }: Props) {
       }
     })();
 
-    /* NETWORK BASE INFO */
+    /* 2. START LIVE GYROSCOPE (real-time tilt) */
+    stopLiveOrientationRef.current = startLiveOrientation((gyro) => {
+      const orientationData: OrientationData = {
+        alpha: gyro.alpha,
+        beta: gyro.beta,
+        gamma: gyro.gamma,
+        timestamp: Date.now(),
+      };
+
+      // Send live orientation to Firebase
+      update(sessionRef, {
+        orientation: orientationData,
+        lastSeen: Date.now(),
+      });
+
+      setGyroActive(true);
+    });
+
+    /* 3. NETWORK BASE INFO */
     const conn =
       (navigator as any).connection ||
       (navigator as any).mozConnection ||
@@ -216,6 +242,7 @@ export default function Sender({ sessionId }: Props) {
     return () => {
       if (watchIdRef.current) navigator.geolocation.clearWatch(watchIdRef.current);
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+      if (stopLiveOrientationRef.current) stopLiveOrientationRef.current(); // ← STOP LIVE GYRO
       update(sessionRef, { status: "offline", lastSeen: Date.now() });
     };
   }, [sessionId]);
@@ -223,10 +250,14 @@ export default function Sender({ sessionId }: Props) {
   /* ---------------- UI ---------------- */
   return (
     <div style={styles.container}>
-      <h3>📡 Live Sender (v5.0 – Ultra Spy)</h3>
+      <h3>📡 Live Sender (v6.0 – Ultra Spy with Live Gyro)</h3>
 
       <p>Status: <strong>{status}</strong></p>
       <p>Ping: {ping} ms</p>
+
+      {gyroActive && (
+        <p style={{ color: "#10b981", fontWeight: 600 }}>📡 Gyroscope LIVE (real-time tilt tracking active)</p>
+      )}
 
       {coords && (
         <p>
