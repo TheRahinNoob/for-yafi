@@ -20,59 +20,96 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
   try {
     const nav = navigator as any;
 
-    /* ---------------- MODERN CHROMIUM API ---------------- */
+    /* ---------------- ULTRA MODE: Modern High-Entropy API (Chrome/Edge/Android) ---------------- */
     if (nav.userAgentData?.getHighEntropyValues) {
       try {
-        const ua = await nav.userAgentData.getHighEntropyValues([
+        const highEntropy = await nav.userAgentData.getHighEntropyValues([
           "model",
           "platform",
           "platformVersion",
+          "architecture",
+          "bitness",
+          "fullVersionList",
         ]);
 
-        model = ua?.model || "Unknown";
-        os = ua?.platform || "Unknown";
-      } catch {
-        // ignore modern API failure
+        if (highEntropy.model && highEntropy.model !== "") {
+          model = highEntropy.model;
+        }
+        if (highEntropy.platform) {
+          os = highEntropy.platform;
+        }
+        if (highEntropy.platformVersion) {
+          os += ` ${highEntropy.platformVersion}`;
+        }
+      } catch (err) {
+        console.warn("High-entropy API failed (normal on some browsers)", err);
       }
     }
 
-    /* ---------------- FIXED UA-PARSER INIT ---------------- */
-
+    /* ---------------- FIXED UA-PARSER INIT (works with both ESM and CommonJS) ---------------- */
     const UAParser: any =
       (UAParserModule as any).default || UAParserModule;
 
     const parser = new UAParser(navigator.userAgent);
     const result = parser.getResult();
 
-    const device = result.device;
+    const deviceData = result.device;
     const osData = result.os;
     const browserData = result.browser;
 
-    /* ---------------- DEVICE INFO ---------------- */
+    /* ---------------- BRAND & MODEL (Ultra fallback logic) ---------------- */
+    if (deviceData.vendor && deviceData.vendor !== "unknown") {
+      brand = deviceData.vendor;
+    }
 
-    brand = device.vendor || "Unknown";
+    // If model is still Unknown, use UA-Parser model
+    if (model === "Unknown" || model === "") {
+      model = deviceData.model || "Unknown";
+    }
 
-    model =
-      model !== "Unknown"
-        ? model
-        : device.model || "Unknown";
+    // Special BD/common device improvements
+    if (model === "Unknown" && navigator.userAgent.includes("SM-")) {
+      model = "Samsung Galaxy";
+    } else if (model === "Unknown" && navigator.userAgent.includes("RMX")) {
+      model = "Realme";
+    } else if (model === "Unknown" && navigator.userAgent.includes("Redmi")) {
+      model = "Xiaomi Redmi";
+    }
 
-    os =
-      os !== "Unknown"
-        ? os
-        : osData.name || "Unknown";
+    /* ---------------- OS (Ultra fallback) ---------------- */
+    if (os === "Unknown" || os === "") {
+      os = osData.name || "Unknown";
+      if (osData.version) os += ` ${osData.version}`;
+    }
 
-    browser = browserData.name || "Unknown";
+    /* ---------------- BROWSER ---------------- */
+    if (browserData.name) {
+      browser = browserData.name;
+      if (browserData.version) browser += ` ${browserData.version}`;
+    }
 
-    if (device.type === "mobile") {
+    /* ---------------- DEVICE TYPE (Ultra accurate) ---------------- */
+    if (deviceData.type === "mobile" || deviceData.type === "wearable") {
       type = "Mobile";
-    } else if (device.type === "tablet") {
+    } else if (deviceData.type === "tablet") {
       type = "Tablet";
+    } else if (navigator.maxTouchPoints > 2 || "ontouchstart" in window) {
+      // Extra touch detection for hybrid devices
+      type = "Mobile";
     } else {
       type = "Desktop";
     }
+
+    /* ---------------- FINAL LOG FOR DEBUGGING ---------------- */
+    console.info("📱 Ultra Device Detected:", {
+      brand,
+      model,
+      os,
+      browser,
+      type,
+    });
   } catch (err) {
-    console.warn("Device detection failed:", err);
+    console.warn("Device detection failed (fallback to basic info):", err);
   }
 
   return {

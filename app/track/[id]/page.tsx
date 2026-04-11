@@ -54,7 +54,6 @@ type SessionData = {
   timestamp?: number;
   pingMs?: number;
   accuracy?: number;
-
   device?: DeviceInfo;
   battery?: BatteryInfo;
   network?: NetworkInfo;
@@ -66,9 +65,7 @@ export default function TrackPage() {
   const { id } = useParams() as { id: string };
 
   const [pos, setPos] = useState<Pos | null>(null);
-  const [status, setStatus] = useState<"online" | "offline" | "loading">(
-    "loading"
-  );
+  const [status, setStatus] = useState<"online" | "offline" | "loading">("loading");
 
   const [lastSeen, setLastSeen] = useState<number | null>(null);
   const [ping, setPing] = useState<number | null>(null);
@@ -78,8 +75,7 @@ export default function TrackPage() {
   const [battery, setBattery] = useState<BatteryInfo | null>(null);
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
 
-  /* ---------------- FIREBASE ---------------- */
-
+  /* ---------------- FIREBASE LISTENER ---------------- */
   useEffect(() => {
     if (!id) return;
 
@@ -99,7 +95,7 @@ export default function TrackPage() {
         setPos({ lat: data.lat, lng: data.lng });
       }
 
-      /* TIME */
+      /* TIME & STATUS */
       const last = data.lastSeen ?? data.timestamp ?? null;
       if (typeof last === "number") setLastSeen(last);
 
@@ -112,12 +108,10 @@ export default function TrackPage() {
       setBattery(data.battery ?? null);
       setNetwork(data.network ?? null);
 
-      /* ONLINE/OFFLINE */
+      /* ONLINE/OFFLINE LOGIC */
       const now = Date.now();
       const lastTime = typeof last === "number" ? last : 0;
-
-      const isOffline =
-        data.status === "offline" || now - lastTime > 20000;
+      const isOffline = data.status === "offline" || now - lastTime > 25000;
 
       setStatus(isOffline ? "offline" : "online");
     });
@@ -125,11 +119,8 @@ export default function TrackPage() {
     return () => unsubscribe();
   }, [id]);
 
-  /* ---------------- SAFE ISP ---------------- */
-
+  /* ---------------- HELPERS ---------------- */
   const ipInfo = network?.ipInfo ?? null;
-
-  /* ---------------- CONNECTION SCORE ---------------- */
 
   const getStrength = () => {
     if (status !== "online") return 0;
@@ -137,20 +128,22 @@ export default function TrackPage() {
     let score = 100;
 
     if (ping !== null) {
-      if (ping > 300) score -= 40;
+      if (ping > 400) score -= 50;
+      else if (ping > 250) score -= 35;
       else if (ping > 150) score -= 20;
       else if (ping > 80) score -= 10;
     }
 
     if (accuracy !== null) {
-      if (accuracy > 100) score -= 30;
-      else if (accuracy > 50) score -= 15;
+      if (accuracy > 150) score -= 40;
+      else if (accuracy > 80) score -= 25;
+      else if (accuracy > 40) score -= 10;
     }
 
     if (lastSeen) {
       const diff = Date.now() - lastSeen;
-      if (diff > 10000) score -= 20;
-      if (diff > 20000) score -= 40;
+      if (diff > 15000) score -= 25;
+      if (diff > 30000) score -= 45;
     }
 
     return Math.max(0, Math.min(100, score));
@@ -164,30 +157,31 @@ export default function TrackPage() {
     const diff = Date.now() - lastSeen;
     const sec = Math.floor(diff / 1000);
     const min = Math.floor(sec / 60);
+    const hr = Math.floor(min / 60);
 
     if (sec < 10) return "just now";
     if (sec < 60) return `${sec}s ago`;
     if (min < 60) return `${min} min ago`;
-
-    return `${Math.floor(min / 60)} hr ago`;
+    return `${hr} hr ago`;
   };
 
-  /* ---------------- LOADING ---------------- */
-
+  /* ---------------- LOADING STATE ---------------- */
   if (!pos) {
     return (
       <div style={styles.loading}>
-        <h2>📡 Waiting for location...</h2>
-        <p>Session: {id}</p>
+        <h2>📡 Waiting for location data...</h2>
+        <p>Session ID: {id}</p>
+        <p style={{ opacity: 0.6, marginTop: 10 }}>
+          Make sure Sender is running on the target device
+        </p>
       </div>
     );
   }
 
-  /* ---------------- UI ---------------- */
-
+  /* ---------------- MAIN UI ---------------- */
   return (
     <div style={styles.page}>
-      {/* LEFT */}
+      {/* LEFT PANEL - MAP */}
       <div style={styles.leftPanel}>
         <div style={styles.mapBox}>
           <LiveMap lat={pos.lat} lng={pos.lng} />
@@ -215,7 +209,7 @@ export default function TrackPage() {
 
           <div style={styles.card}>
             <p>Ping</p>
-            <h3>{ping !== null ? `${ping} ms` : "unknown"}</h3>
+            <h3>{ping !== null ? `${ping} ms` : "—"}</h3>
           </div>
 
           <div style={styles.card}>
@@ -236,15 +230,14 @@ export default function TrackPage() {
         </div>
       </div>
 
-      {/* RIGHT */}
+      {/* RIGHT PANEL - DASHBOARD */}
       <div style={styles.rightPanel}>
-        <h2>📊 Dashboard</h2>
-        <p style={{ opacity: 0.7 }}>Session ID: {id}</p>
+        <h2>📊 Live Dashboard</h2>
+        <p style={{ opacity: 0.7, marginBottom: 20 }}>Session ID: {id}</p>
 
-        {/* DEVICE */}
+        {/* DEVICE INFO */}
         <div style={styles.cardRight}>
           <h3>📱 Device Info</h3>
-
           {device ? (
             <>
               <p style={{ fontSize: 18, fontWeight: 600 }}>
@@ -268,30 +261,43 @@ export default function TrackPage() {
               </div>
             </>
           ) : (
-            <p>Loading device...</p>
+            <p>Loading device info...</p>
           )}
         </div>
 
         {/* NETWORK + ISP */}
         <div style={styles.cardRight}>
-          <h3>🌐 Network Info</h3>
-
+          <h3>🌐 Network & ISP</h3>
           {network ? (
             <>
-              <p>Type: {network.type ?? "unknown"}</p>
+              <p>Connection Type: {network.type ?? "unknown"}</p>
               <p>Speed: {network.downlink ?? "?"} Mbps</p>
               <p>RTT: {network.rtt ?? "?"} ms</p>
 
               <div style={styles.subSection}>
-                <p style={{ fontWeight: 600 }}>🌍 ISP Layer</p>
-
-                <p>ISP: {ipInfo?.org ?? "Not detected"}</p>
-                <p>City: {ipInfo?.city ?? "Unknown"}</p>
-                <p>Country: {ipInfo?.country ?? "Unknown"}</p>
+                <p style={{ fontWeight: 600 }}>🌍 ISP Information</p>
+                <p>
+                  <strong>ISP:</strong>{" "}
+                  {ipInfo?.org ?? "Detecting..."}
+                </p>
+                <p>
+                  <strong>City:</strong> {ipInfo?.city ?? "Unknown"}
+                </p>
+                <p>
+                  <strong>Region:</strong> {ipInfo?.region ?? "Unknown"}
+                </p>
+                <p>
+                  <strong>Country:</strong> {ipInfo?.country ?? "Unknown"}
+                </p>
+                {ipInfo?.source && (
+                  <p style={{ opacity: 0.6, fontSize: 13 }}>
+                    Detected via: {ipInfo.source}
+                  </p>
+                )}
               </div>
             </>
           ) : (
-            <p>Loading network...</p>
+            <p>Loading network info...</p>
           )}
         </div>
       </div>
@@ -312,17 +318,18 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   leftPanel: {
-    width: 320,
+    width: 340,
     display: "flex",
     flexDirection: "column",
     gap: 12,
   },
 
   mapBox: {
-    width: 320,
-    height: 320,
+    width: 340,
+    height: 340,
     borderRadius: 16,
     overflow: "hidden",
+    border: "1px solid #1f2937",
   },
 
   infoStack: {
@@ -333,27 +340,28 @@ const styles: Record<string, React.CSSProperties> = {
 
   rightPanel: {
     flex: 1,
-    padding: 20,
+    padding: 24,
     background: "#111827",
     borderRadius: 16,
+    overflowY: "auto",
   },
 
   card: {
-    padding: 12,
+    padding: 14,
     borderRadius: 12,
     background: "#1f2937",
   },
 
   cardRight: {
-    marginTop: 16,
-    padding: 16,
+    marginTop: 20,
+    padding: 18,
     borderRadius: 12,
     background: "#1f2937",
   },
 
   subSection: {
-    marginTop: 10,
-    paddingTop: 10,
+    marginTop: 12,
+    paddingTop: 12,
     borderTop: "1px solid #374151",
   },
 
@@ -365,5 +373,6 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     background: "#0b1220",
     color: "white",
+    textAlign: "center",
   },
 };

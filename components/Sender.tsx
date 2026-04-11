@@ -31,8 +31,9 @@ type NetworkInfo = {
   type?: string;
   downlink?: number;
   rtt?: number;
-  ipInfo?: IPInfo;   // 🔥 ADD THIS BACK
+  ipInfo?: IPInfo;
 };
+
 type Props = {
   sessionId: string;
 };
@@ -56,8 +57,71 @@ export default function Sender({ sessionId }: Props) {
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
   const [battery, setBattery] = useState<BatteryInfo | null>(null);
 
-  /* ---------------- INIT ---------------- */
+  /* ---------------- FETCH WITH TIMEOUT ---------------- */
+  const fetchWithTimeout = async (url: string, timeout = 7000): Promise<any> => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
 
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(id);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (err) {
+      clearTimeout(id);
+      throw err;
+    }
+  };
+
+  /* ---------------- SUPER ISP DETECTION (Detects ALL BD ISPs) ---------------- */
+  const fetchISP = async (): Promise<IPInfo | null> => {
+    console.info("🔍 Starting advanced ISP detection for Bangladesh...");
+
+    const apis = [
+      { url: "https://ip-api.com/json/", name: "ip-api.com" },
+      { url: "https://freeipapi.com/json/", name: "freeipapi.com" },
+      { url: "https://ipbase.com/json", name: "ipbase.com" },
+      { url: "https://api.bigdatacloud.net/data/client-info", name: "bigdatacloud" },
+      { url: "https://ipapi.co/json/", name: "ipapi.co" },
+      { url: "https://ipwho.is/", name: "ipwho.is" },
+    ];
+
+    for (const api of apis) {
+      try {
+        const data = await fetchWithTimeout(api.url);
+
+        let ispName = null;
+
+        if (data.isp) ispName = data.isp;
+        else if (data.org) ispName = data.org;
+        else if (data.connection?.isp) ispName = data.connection.isp;
+        else if (data.provider) ispName = data.provider;
+        else if (data.network?.name) ispName = data.network.name;
+        else if (data.asn?.name) ispName = data.asn.name;
+
+        if (ispName && typeof ispName === "string" && ispName.length > 3) {
+          console.info(`✅ ISP detected via ${api.name}:`, ispName);
+
+          return {
+            ip: data.query || data.ip || data.ipAddress || "Unknown",
+            city: data.city || data.cityName || data.location?.city,
+            region: data.regionName || data.region || data.location?.region,
+            country: data.country || data.country_name || data.location?.country,
+            org: ispName,
+            source: api.name,
+          };
+        }
+      } catch (e: unknown) {
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        console.warn(`${api.name} failed:`, errorMessage);
+      }
+    }
+
+    console.warn("⚠️ All ISP APIs failed - could not detect ISP");
+    return null;
+  };
+
+  /* ---------------- INIT ---------------- */
   useEffect(() => {
     if (!sessionId || !navigator.geolocation) {
       setStatus("error");
@@ -68,10 +132,7 @@ export default function Sender({ sessionId }: Props) {
     (async () => {
       const info = await getDeviceInfo();
       setDevice(info);
-
-      update(sessionRef, {
-        device: info,
-      });
+      update(sessionRef, { device: info });
     })();
 
     /* ---------------- NETWORK BASE ---------------- */
@@ -97,53 +158,12 @@ export default function Sender({ sessionId }: Props) {
     });
 
     /* ---------------- ISP DETECTION ---------------- */
-
-    const fetchISP = async (): Promise<IPInfo | null> => {
-      try {
-        const res = await fetch("https://ipapi.co/json/");
-        const data = await res.json();
-
-        if (data?.ip) {
-          return {
-            ip: data.ip,
-            city: data.city,
-            region: data.region,
-            country: data.country_name,
-            org: data.org,
-            source: "ipapi",
-          };
-        }
-      } catch {}
-
-      try {
-        const res = await fetch("https://ipwho.is/");
-        const data = await res.json();
-
-        if (data?.success) {
-          return {
-            ip: data.ip,
-            city: data.city,
-            region: data.region,
-            country: data.country,
-            org: data.connection?.isp,
-            source: "ipwho",
-          };
-        }
-      } catch {}
-
-      return null;
-    };
-
     const runISP = async () => {
       const ipInfo = await fetchISP();
       if (!ipInfo) return;
 
-      setNetwork((prev) => ({
-        ...prev,
-        ipInfo,
-      }));
+      setNetwork((prev) => ({ ...prev, ipInfo }));
 
-      // 🔥 CRITICAL FIX: atomic write (no overwrite bug)
       update(sessionRef, {
         "network/ipInfo": ipInfo,
       });
@@ -152,9 +172,7 @@ export default function Sender({ sessionId }: Props) {
     runISP();
 
     /* ---------------- BATTERY ---------------- */
-
     const nav = navigator as any;
-
     if (nav.getBattery) {
       nav.getBattery().then((bat: any) => {
         const pushBattery = () => {
@@ -162,12 +180,8 @@ export default function Sender({ sessionId }: Props) {
             level: bat.level,
             charging: bat.charging,
           };
-
           setBattery(info);
-
-          update(sessionRef, {
-            battery: info,
-          });
+          update(sessionRef, { battery: info });
         };
 
         pushBattery();
@@ -177,7 +191,6 @@ export default function Sender({ sessionId }: Props) {
     }
 
     /* ---------------- PRESENCE ---------------- */
-
     const unsubscribe = onValue(connectedRef, (snap) => {
       const connected = snap.val();
 
@@ -199,36 +212,25 @@ export default function Sender({ sessionId }: Props) {
     });
 
     /* ---------------- HEARTBEAT ---------------- */
-
     heartbeatRef.current = setInterval(async () => {
       const start = Date.now();
-
       try {
         await update(sessionRef, { heartbeat: start });
-
         const latency = Date.now() - start;
         setPing(latency);
-
-        update(sessionRef, {
-          pingMs: latency,
-          lastSeen: Date.now(),
-        });
+        update(sessionRef, { pingMs: latency, lastSeen: Date.now() });
       } catch {
         setPing(999);
       }
     }, 8000);
 
     /* ---------------- GPS ---------------- */
-
     const handleSuccess = (pos: GeolocationPosition) => {
       const now = Date.now();
-
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
-      const accuracy = pos.coords.accuracy;
-
       if (now - lastGpsUpdate.current < 2000) return;
       lastGpsUpdate.current = now;
+
+      const { latitude: lat, longitude: lng, accuracy } = pos.coords;
 
       setCoords({ lat, lng, accuracy });
       setStatus("online");
@@ -256,16 +258,13 @@ export default function Sender({ sessionId }: Props) {
     );
 
     /* ---------------- CLEANUP ---------------- */
-
     return () => {
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
       }
-
       if (heartbeatRef.current) {
         clearInterval(heartbeatRef.current);
       }
-
       update(sessionRef, {
         status: "offline",
         lastSeen: Date.now(),
@@ -274,11 +273,9 @@ export default function Sender({ sessionId }: Props) {
   }, [sessionId]);
 
   /* ---------------- UI ---------------- */
-
   return (
     <div style={styles.container}>
       <h3>📡 Live Sender</h3>
-
       <p>Status: {status}</p>
       <p>Ping: {ping} ms</p>
 
@@ -293,10 +290,8 @@ export default function Sender({ sessionId }: Props) {
           <p>IP: {network.ipInfo.ip}</p>
           <p>City: {network.ipInfo.city}</p>
           <p>Country: {network.ipInfo.country}</p>
-          <p>ISP: {network.ipInfo.org}</p>
-          <p style={{ opacity: 0.6 }}>
-            Source: {network.ipInfo.source}
-          </p>
+          <p style={{ fontWeight: 600 }}>ISP: {network.ipInfo.org}</p>
+          <p style={{ opacity: 0.6 }}>Source: {network.ipInfo.source}</p>
         </div>
       )}
 
