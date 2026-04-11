@@ -1,10 +1,10 @@
 /**
  * ██████████████████████████████████████████████████████████████
- * DEVICE DETECTOR – ULTRA SPY GRADE EDITION (v5.1)
+ * DEVICE DETECTOR – ULTRA SPY GRADE EDITION (v5.2)
  * 
  * MAXIMUM POSSIBLE CLIENT-SIDE INTELLIGENCE (2026)
  * Fully TypeScript-error-free
- * All previous errors fixed
+ * All previous errors fixed + Samsung + CPU + isMobileApp fixes applied
  * 
  * Captures EVERYTHING possible with consent.
  * ██████████████████████████████████████████████████████████████
@@ -49,7 +49,7 @@ export type DeviceInfo = {
 
   // System & Locale
   language?: string;
-  languages?: readonly string[];        // ← Fixed readonly type
+  languages?: readonly string[];
   timezone?: string;
   darkMode?: boolean;
   prefersReducedMotion?: boolean;
@@ -124,7 +124,7 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       (UAParserModule as any).UAParser ??
       UAParserModule;
 
-    const parser = typeof UAParser === "function" ? new UAParser() : new (UAParser as any)();
+    const parser = typeof UAParser === "function" ? new UAParser(ua) : new (UAParser as any)(ua);
     const result = parser.getResult();
 
     info.brand = result.device?.vendor || info.brand;
@@ -141,7 +141,14 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       info.browserVersion = result.browser.version;
     }
 
-    /* ==================== 3. BANGLADESH FALLBACKS ==================== */
+    /* ==================== 3. ENHANCED BRAND & MODEL FALLBACKS (Samsung SM- series fix) ==================== */
+    if (info.brand === "Unknown" || info.brand === "") {
+      if (ua.includes("SM-") || ua.includes("Samsung")) info.brand = "Samsung";
+      else if (ua.includes("RMX")) info.brand = "Realme";
+      else if (ua.includes("Redmi") || ua.includes("Xiaomi")) info.brand = "Xiaomi";
+      else if (ua.includes("Pixel")) info.brand = "Google";
+    }
+
     if (info.model === "Unknown") {
       if (ua.includes("SM-")) info.model = "Samsung Galaxy";
       else if (ua.includes("RMX")) info.model = "Realme";
@@ -149,13 +156,30 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       else if (ua.includes("Pixel")) info.model = "Google Pixel";
     }
 
-    /* ==================== 4. HARDWARE ==================== */
+    /* ==================== 4. HARDWARE (CPU hint fixed – no more Apple Silicon on Android) ==================== */
     info.cpuCores = nav.hardwareConcurrency || undefined;
     if (nav.deviceMemory) info.ramGB = nav.deviceMemory;
 
-    if (ua.includes("Intel")) info.cpuModelHint = "Intel";
-    else if (ua.includes("AMD")) info.cpuModelHint = "AMD";
-    else if (ua.includes("Apple")) info.cpuModelHint = "Apple Silicon";
+    // Smart CPU hint logic
+    if (ua.includes("Intel")) {
+      info.cpuModelHint = "Intel";
+    } else if (ua.includes("AMD")) {
+      info.cpuModelHint = "AMD";
+    } else if (info.os.toLowerCase().includes("android")) {
+      // Android-specific chipset hints (MediaTek / Exynos / Snapdragon)
+      if (ua.includes("Exynos")) info.cpuModelHint = "Exynos";
+      else if (ua.includes("MediaTek") || ua.includes("Dimensity") || ua.includes("MT6") || ua.includes("MT8")) {
+        info.cpuModelHint = "MediaTek";
+      } else if (ua.includes("Snapdragon") || ua.includes("SM")) {
+        info.cpuModelHint = "Snapdragon";
+      } else {
+        info.cpuModelHint = "ARM (Mobile)";
+      }
+    } else if (ua.includes("Apple") && (info.os.toLowerCase().includes("ios") || info.os.toLowerCase().includes("mac"))) {
+      info.cpuModelHint = "Apple Silicon";
+    } else if (ua.includes("Apple")) {
+      info.cpuModelHint = "Apple";
+    }
 
     /* ==================== 5. WEBGL GPU ==================== */
     try {
@@ -194,7 +218,7 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
 
     /* ==================== 7. SYSTEM PREFERENCES ==================== */
     info.language = navigator.language || undefined;
-    info.languages = navigator.languages || [];           // ← Fixed readonly issue
+    info.languages = navigator.languages || [];
     try {
       info.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     } catch {}
@@ -209,11 +233,15 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
     info.platform = navigator.platform;
     info.vendor = navigator.vendor;
 
-    /* ==================== 9. MOBILE / DESKTOP SPECIFIC ==================== */
-    info.touchPoints = nav.maxTouchPoints || 0;           // always a number
+    /* ==================== 9. MOBILE / DESKTOP SPECIFIC (isMobileApp fixed) ==================== */
+    info.touchPoints = nav.maxTouchPoints || 0;
     info.isTouchDevice = (info.touchPoints ?? 0) > 0;
     info.isStandalone = window.matchMedia("(display-mode: standalone)").matches;
-    info.isMobileApp = info.isStandalone || /iPhone|iPad|iPod|Android/.test(ua);
+
+    // FIXED: Only true for real installed PWA / home-screen apps (no false positive on normal Chrome/Android browser)
+    info.isMobileApp =
+      info.isStandalone ||
+      (typeof (navigator as any).standalone !== "undefined" && (navigator as any).standalone === true);
 
     /* ==================== 10. DEVICE TYPE ==================== */
     if (result.device?.type === "mobile" || (info.touchPoints ?? 0) > 2) {
@@ -263,7 +291,7 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
     /* ==================== 12. RAW UA ==================== */
     info.userAgent = ua.substring(0, 300);
 
-    console.info("🕵️‍♂️ [DEVICE DETECTOR v5.1] Full Profile Captured:", info);
+    console.info("🕵️‍♂️ [DEVICE DETECTOR v5.2] Full Profile Captured:", info);
   } catch (err) {
     console.warn("❌ Device detection failed partially:", err);
   }
