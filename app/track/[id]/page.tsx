@@ -1,9 +1,11 @@
 /**
  * ██████████████████████████████████████████████████████████████
- * TRACKER PAGE – LIVE SESSION VIEW (v2.0 – Fully Adapted)
+ * TRACKER PAGE – LIVE SESSION VIEW (v3.0 – Fully Adapted)
  * 
- * Now includes SIM Carrier detection with confidence and method.
- * Clearly shows when user is on WiFi (low confidence) vs Mobile Data.
+ * Now shows:
+ *   • On mobile data → SIM provider name (Grameenphone, Robi, etc.)
+ *   • On WiFi → WiFi broadband ISP name (BTCL, Fiber@Home, etc.)
+ *   • Clear confidence + method so you always know what happened
  * ██████████████████████████████████████████████████████████████
  */
 
@@ -56,7 +58,7 @@ type NetworkInfo = {
 };
 
 type SimInfo = {
-  carrier?: string;
+  carrier?: string;      // can be SIM name OR WiFi ISP name
   confidence?: number;
   method?: string;
 };
@@ -72,7 +74,7 @@ type SessionData = {
   device?: DeviceInfo;
   battery?: BatteryInfo;
   network?: NetworkInfo;
-  sim?: SimInfo;           // ← New: SIM data from Sender
+  sim?: SimInfo;
 };
 
 /* ---------------- PAGE ---------------- */
@@ -90,7 +92,7 @@ export default function TrackPage() {
   const [device, setDevice] = useState<DeviceInfo | null>(null);
   const [battery, setBattery] = useState<BatteryInfo | null>(null);
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
-  const [sim, setSim] = useState<SimInfo | null>(null);   // ← New state for SIM
+  const [sim, setSim] = useState<SimInfo | null>(null);
 
   /* ---------------- FIREBASE LISTENER ---------------- */
   useEffect(() => {
@@ -107,26 +109,21 @@ export default function TrackPage() {
         return;
       }
 
-      /* LOCATION */
       if (typeof data.lat === "number" && typeof data.lng === "number") {
         setPos({ lat: data.lat, lng: data.lng });
       }
 
-      /* TIME & STATUS */
       const last = data.lastSeen ?? data.timestamp ?? null;
       if (typeof last === "number") setLastSeen(last);
 
-      /* METRICS */
       if (typeof data.pingMs === "number") setPing(data.pingMs);
       if (typeof data.accuracy === "number") setAccuracy(data.accuracy);
 
-      /* DEVICE / BATTERY / NETWORK / SIM */
       setDevice(data.device ?? null);
       setBattery(data.battery ?? null);
       setNetwork(data.network ?? null);
-      setSim(data.sim ?? null);                    // ← New: Read SIM data
+      setSim(data.sim ?? null);
 
-      /* ONLINE/OFFLINE LOGIC */
       const now = Date.now();
       const lastTime = typeof last === "number" ? last : 0;
       const isOffline = data.status === "offline" || now - lastTime > 25000;
@@ -142,28 +139,23 @@ export default function TrackPage() {
 
   const getStrength = () => {
     if (status !== "online") return 0;
-
     let score = 100;
-
     if (ping !== null) {
       if (ping > 400) score -= 50;
       else if (ping > 250) score -= 35;
       else if (ping > 150) score -= 20;
       else if (ping > 80) score -= 10;
     }
-
     if (accuracy !== null) {
       if (accuracy > 150) score -= 40;
       else if (accuracy > 80) score -= 25;
       else if (accuracy > 40) score -= 10;
     }
-
     if (lastSeen) {
       const diff = Date.now() - lastSeen;
       if (diff > 15000) score -= 25;
       if (diff > 30000) score -= 45;
     }
-
     return Math.max(0, Math.min(100, score));
   };
 
@@ -171,12 +163,10 @@ export default function TrackPage() {
 
   const formatLastSeen = () => {
     if (!lastSeen) return "unknown";
-
     const diff = Date.now() - lastSeen;
     const sec = Math.floor(diff / 1000);
     const min = Math.floor(sec / 60);
     const hr = Math.floor(min / 60);
-
     if (sec < 10) return "just now";
     if (sec < 60) return `${sec}s ago`;
     if (min < 60) return `${min} min ago`;
@@ -232,16 +222,7 @@ export default function TrackPage() {
 
           <div style={styles.card}>
             <p>Connection Strength</p>
-            <h3
-              style={{
-                color:
-                  strength > 70
-                    ? "#22c55e"
-                    : strength > 40
-                    ? "#facc15"
-                    : "#ef4444",
-              }}
-            >
+            <h3 style={{ color: strength > 70 ? "#22c55e" : strength > 40 ? "#facc15" : "#ef4444" }}>
               {strength}%
             </h3>
           </div>
@@ -261,19 +242,13 @@ export default function TrackPage() {
               <p style={{ fontSize: 18, fontWeight: 600 }}>
                 {device.brand ?? "Unknown"} {device.model ?? ""}
               </p>
-              <p>
-                {device.os ?? "Unknown OS"} • {device.browser ?? "Unknown"}
-              </p>
-              <p style={{ opacity: 0.6 }}>
-                Type: {device.type ?? "Unknown"}
-              </p>
+              <p>{device.os ?? "Unknown OS"} • {device.browser ?? "Unknown"}</p>
+              <p style={{ opacity: 0.6 }}>Type: {device.type ?? "Unknown"}</p>
 
               <div style={styles.subSection}>
                 <p>
                   🔋 Battery:{" "}
-                  {battery?.level !== undefined
-                    ? `${Math.round(battery.level * 100)}%`
-                    : "Unknown"}
+                  {battery?.level !== undefined ? `${Math.round(battery.level * 100)}%` : "Unknown"}
                   {battery?.charging ? " ⚡ Charging" : ""}
                 </p>
               </div>
@@ -294,23 +269,11 @@ export default function TrackPage() {
 
               <div style={styles.subSection}>
                 <p style={{ fontWeight: 600 }}>🌍 ISP Information</p>
-                <p>
-                  <strong>ISP:</strong> {ipInfo?.org ?? "Detecting..."}
-                </p>
-                <p>
-                  <strong>City:</strong> {ipInfo?.city ?? "Unknown"}
-                </p>
-                <p>
-                  <strong>Region:</strong> {ipInfo?.region ?? "Unknown"}
-                </p>
-                <p>
-                  <strong>Country:</strong> {ipInfo?.country ?? "Unknown"}
-                </p>
-                {ipInfo?.source && (
-                  <p style={{ opacity: 0.6, fontSize: 13 }}>
-                    Detected via: {ipInfo.source}
-                  </p>
-                )}
+                <p><strong>ISP:</strong> {ipInfo?.org ?? "Detecting..."}</p>
+                <p><strong>City:</strong> {ipInfo?.city ?? "Unknown"}</p>
+                <p><strong>Region:</strong> {ipInfo?.region ?? "Unknown"}</p>
+                <p><strong>Country:</strong> {ipInfo?.country ?? "Unknown"}</p>
+                {ipInfo?.source && <p style={{ opacity: 0.6, fontSize: 13 }}>Detected via: {ipInfo.source}</p>}
               </div>
             </>
           ) : (
@@ -318,24 +281,18 @@ export default function TrackPage() {
           )}
         </div>
 
-        {/* NEW: SIM CARRIER DETECTION */}
+        {/* INTERNET PROVIDER (SIM or WiFi ISP) */}
         <div style={styles.cardRight}>
-          <h3>📶 SIM Carrier Detection</h3>
+          <h3>🌐 Internet Provider</h3>
           {sim && sim.carrier ? (
             <>
               <p style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>
                 {sim.carrier}
               </p>
-              
-              <div style={{ 
-                display: "flex", 
-                alignItems: "center", 
-                gap: 12, 
-                marginTop: 12 
-              }}>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
                 <div style={{
-                  background: sim.confidence && sim.confidence > 60 ? "#22c55e" : 
-                              sim.confidence && sim.confidence > 30 ? "#eab308" : "#ef4444",
+                  background: (sim.confidence ?? 0) > 60 ? "#22c55e" : (sim.confidence ?? 0) > 30 ? "#eab308" : "#ef4444",
                   color: "white",
                   padding: "4px 12px",
                   borderRadius: 999,
@@ -347,26 +304,21 @@ export default function TrackPage() {
               </div>
 
               {sim.method && (
-                <p style={{ 
-                  marginTop: 12, 
-                  fontSize: 13, 
-                  opacity: 0.75,
-                  wordBreak: "break-all"
-                }}>
+                <p style={{ marginTop: 12, fontSize: 13, opacity: 0.75, wordBreak: "break-all" }}>
                   Method: <span style={{ fontFamily: "monospace" }}>{sim.method}</span>
                 </p>
               )}
 
               <div style={styles.subSection}>
                 <p style={{ fontSize: 13, opacity: 0.7 }}>
-                  {sim.confidence && sim.confidence < 25 
-                    ? "⚠️ User is likely on WiFi. Switch to mobile data for accurate SIM detection." 
-                    : "✅ Detection running on mobile network"}
+                  {sim.method?.includes("wifi") 
+                    ? "📶 Connected via WiFi – showing broadband ISP name" 
+                    : "📱 Connected via Mobile Data – showing SIM provider"}
                 </p>
               </div>
             </>
           ) : (
-            <p>Waiting for SIM detection...</p>
+            <p>Waiting for provider detection...</p>
           )}
         </div>
       </div>
@@ -377,71 +329,13 @@ export default function TrackPage() {
 /* ---------------- STYLES ---------------- */
 
 const styles: Record<string, React.CSSProperties> = {
-  page: {
-    display: "flex",
-    height: "100vh",
-    background: "#0b1220",
-    color: "white",
-    padding: 16,
-    gap: 20,
-  },
-
-  leftPanel: {
-    width: 340,
-    display: "flex",
-    flexDirection: "column",
-    gap: 12,
-  },
-
-  mapBox: {
-    width: 340,
-    height: 340,
-    borderRadius: 16,
-    overflow: "hidden",
-    border: "1px solid #1f2937",
-  },
-
-  infoStack: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 10,
-  },
-
-  rightPanel: {
-    flex: 1,
-    padding: 24,
-    background: "#111827",
-    borderRadius: 16,
-    overflowY: "auto",
-  },
-
-  card: {
-    padding: 14,
-    borderRadius: 12,
-    background: "#1f2937",
-  },
-
-  cardRight: {
-    marginTop: 20,
-    padding: 18,
-    borderRadius: 12,
-    background: "#1f2937",
-  },
-
-  subSection: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTop: "1px solid #374151",
-  },
-
-  loading: {
-    height: "100vh",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "column",
-    background: "#0b1220",
-    color: "white",
-    textAlign: "center",
-  },
+  page: { display: "flex", height: "100vh", background: "#0b1220", color: "white", padding: 16, gap: 20 },
+  leftPanel: { width: 340, display: "flex", flexDirection: "column", gap: 12 },
+  mapBox: { width: 340, height: 340, borderRadius: 16, overflow: "hidden", border: "1px solid #1f2937" },
+  infoStack: { display: "flex", flexDirection: "column", gap: 10 },
+  rightPanel: { flex: 1, padding: 24, background: "#111827", borderRadius: 16, overflowY: "auto" },
+  card: { padding: 14, borderRadius: 12, background: "#1f2937" },
+  cardRight: { marginTop: 20, padding: 18, borderRadius: 12, background: "#1f2937" },
+  subSection: { marginTop: 12, paddingTop: 12, borderTop: "1px solid #374151" },
+  loading: { height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", background: "#0b1220", color: "white", textAlign: "center" },
 };

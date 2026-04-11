@@ -1,10 +1,13 @@
 /**
  * ██████████████████████████████████████████████████████████████
- * SIM CARRIER DETECTOR – BANGLADESH EDITION (v2.0 – Highly Sophisticated)
+ * INTERNET PROVIDER DETECTOR – BANGLADESH (v3.0)
  * 
- * This is the brain of the entire SIM detection system.
- * Completely free. No paid APIs. Works with real-world IP responses.
- * Handles WiFi gracefully (low confidence when on WiFi).
+ * NEW BEHAVIOUR:
+ *   • On mobile data (4G/5G) → shows correct SIM carrier (high confidence)
+ *   • On WiFi → shows the WiFi broadband ISP name (e.g. BTCL, Fiber@Home)
+ *   • Never returns "Unknown" unless absolutely nothing is detected
+ * 
+ * Fixed all wrong detection issues with real ISP strings & ASNs
  * ██████████████████████████████████████████████████████████████
  */
 
@@ -17,37 +20,29 @@ export type SimCarrier =
   | "Unknown";
 
 export type SimResult = {
-  carrier: SimCarrier;
-  confidence: number; // 0–100 (percentage)
+  carrier: SimCarrier | string;   // can now be ISP name on WiFi
+  confidence: number; // 0–100
   method: string;
   raw?: any;
 };
 
-/* ---------------- REAL-WORLD BANGLADESH CARRIER DATABASE ---------------- */
+/* ---------------- REAL BANGLADESH PROVIDER DATABASE ---------------- */
 const carrierDatabase = [
   {
     carrier: "Grameenphone",
-    keywords: [
-      "grameenphone", "grameen", "gp", "telenor", "vimpelcom",
-      "gp internet", "grameenphone ltd", "grameenphone limited"
-    ],
-    asns: ["AS24309", "AS24432"],
+    keywords: ["grameenphone", "grameen", "gp", "grameenphone ltd", "grameenphone limited"],
+    asns: ["AS24389"],
     weight: 1.0,
   },
   {
     carrier: "Robi",
-    keywords: [
-      "robi", "axiata", "robi axiata", "robi ltd", "robi axiata ltd"
-    ],
-    asns: ["AS135136", "AS45796"],
+    keywords: ["robi", "axiata", "robi axiata", "axiata bangladesh", "tm international", "robi axitata"],
+    asns: ["AS24432"],
     weight: 1.0,
   },
   {
     carrier: "Banglalink",
-    keywords: [
-      "banglalink", "bangla link", "vimpelcom", "banglalink digital",
-      "banglalink digital communications", "orascom"
-    ],
+    keywords: ["banglalink", "bangla link", "banglalink digital", "orascom"],
     asns: ["AS24323", "AS132602"],
     weight: 1.0,
   },
@@ -60,106 +55,90 @@ const carrierDatabase = [
   {
     carrier: "Teletalk",
     keywords: ["teletalk", "teletalk bd", "teletalk bangladesh"],
-    asns: ["AS23688"],
+    asns: ["AS45925", "AS23688"],
     weight: 1.0,
   },
 ];
 
-/* ---------------- BLOCK GENERIC / WIFI / DATACENTER NETWORKS ---------------- */
-function isGenericOrWiFiNetwork(text: string = ""): boolean {
-  const genericTerms = [
-    "amazon", "aws", "google", "microsoft", "azure", "cloudflare",
+/* ---------------- HELPERS ---------------- */
+function isGenericWiFiOrBackbone(text: string = ""): boolean {
+  const bad = [
+    "amazon", "aws", "google", "cloudflare", "microsoft", "azure",
     "digitalocean", "linode", "vultr", "ovh", "hosting", "oracle",
     "btcl", "btrc", "fiber@home", "fiber home", "f@home", "backbone",
-    "ixp", "submarine cable", "bangladesh telecom", "wifi", "broadband",
-    "cable", "isp broadband", "home internet"
+    "ixp", "submarine", "wifi", "broadband", "cable", "home internet"
   ];
   const lower = text.toLowerCase();
-  return genericTerms.some((term) => lower.includes(term));
+  return bad.some((b) => lower.includes(b));
 }
 
-/* ---------------- MAIN DETECTION ENGINE ---------------- */
+function isCellularConnection(connectionType = "", effectiveType = ""): boolean {
+  const conn = (connectionType || "").toLowerCase();
+  const eff = (effectiveType || "").toLowerCase();
+  return (
+    conn === "cellular" ||
+    eff === "4g" || eff === "5g" ||
+    eff.includes("4g") || eff.includes("5g")
+  );
+}
+
+/* ---------------- MAIN DETECTOR (NEW LOGIC) ---------------- */
 export function detectSimCarrier(input: {
   isp?: string;
   org?: string;
   as?: string;
   country?: string;
-  connectionType?: string;   // e.g. "cellular", "wifi"
-  effectiveType?: string;    // e.g. "4g", "5g", "3g"
+  connectionType?: string;
+  effectiveType?: string;
 }): SimResult {
   const ispRaw = (input.isp || input.org || "").toLowerCase().trim();
   const asnRaw = (input.as || "").toUpperCase().trim();
-
-  // Step 1: Block obvious non-mobile networks
-  if (isGenericOrWiFiNetwork(ispRaw)) {
-    return {
-      carrier: "Unknown",
-      confidence: 8,
-      method: "blocked_generic_or_wifi",
-      raw: input,
-    };
-  }
+  const isCellular = isCellularConnection(input.connectionType, input.effectiveType);
 
   // Default fallback
   let best: SimResult = {
     carrier: "Unknown",
-    confidence: 8,
+    confidence: 10,
     method: "no_match",
     raw: input,
   };
 
-  // Step 2: Score every carrier
-  for (const carrier of carrierDatabase) {
-    let score = 0;
+  // STEP 1: If on mobile data → try to detect SIM carrier
+  if (isCellular) {
+    for (const entry of carrierDatabase) {
+      let score = 0;
 
-    // 1. Keyword match (very strong for BD ISPs)
-    const keywordMatched = carrier.keywords.some((k) => ispRaw.includes(k));
-    if (keywordMatched) score += 45;
+      if (entry.keywords.some((k) => ispRaw.includes(k))) score += 45;
+      if (entry.asns.some((a) => asnRaw === a || asnRaw.includes(a) || a.includes(asnRaw))) score += 40;
 
-    // 2. ASN match (extremely reliable when present)
-    const asnMatched = carrier.asns.some((a) => 
-      asnRaw === a || asnRaw.includes(a) || a.includes(asnRaw)
-    );
-    if (asnMatched) score += 40;
+      if (input.country === "Bangladesh") score += 8;
+      if (isCellular) score += 30;                    // big mobile boost
 
-    // 3. Country boost
-    if (input.country === "Bangladesh") score += 8;
+      score = Math.min(score * entry.weight, 99);
 
-    // 4. Mobile connection type from browser (BIGGEST IMPROVEMENT)
-    const connType = (input.connectionType || "").toLowerCase();
-    const effType = (input.effectiveType || "").toLowerCase();
-    
-    const isCellular = connType === "cellular" || 
-                      effType === "4g" || 
-                      effType === "5g" || 
-                      effType.includes("4g") || 
-                      effType.includes("5g");
-
-    if (isCellular) score += 30;           // huge boost on real mobile data
-
-    // 5. Extra mobile hint in ISP name
-    if (ispRaw.includes("mobile") || ispRaw.includes("cellular") || ispRaw.includes("4g") || ispRaw.includes("5g")) {
-      score += 12;
-    }
-
-    // Final score normalization
-    score = Math.min(score * carrier.weight, 99);
-
-    // Update best result if this carrier scores higher
-    if (score > best.confidence) {
-      best = {
-        carrier: carrier.carrier as SimCarrier,
-        confidence: Math.round(score),
-        method: "hybrid_isp_asn_mobile_browser",
-        raw: input,
-      };
+      if (score > best.confidence) {
+        best = {
+          carrier: entry.carrier as SimCarrier,
+          confidence: Math.round(score),
+          method: "mobile_sim_carrier",
+          raw: input,
+        };
+      }
     }
   }
 
-  // If still very low score and we are on WiFi → be explicit
-  if (best.confidence < 20 && (input.connectionType || "").toLowerCase() === "wifi") {
-    best.method = "wifi_detected_low_confidence";
+  // STEP 2: If we have a good mobile match → return it
+  if (best.confidence >= 40) {
+    return best;
   }
 
-  return best;
+  // STEP 3: WiFi or no good SIM match → show the actual ISP / broadband provider name
+  const providerName = (input.isp || input.org || "Unknown ISP").trim();
+
+  return {
+    carrier: providerName,
+    confidence: isCellular ? 35 : 65,           // lower on mobile fallback, higher on WiFi
+    method: isCellular ? "mobile_isp_fallback" : "wifi_broadband_isp",
+    raw: input,
+  };
 }
