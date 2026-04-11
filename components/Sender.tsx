@@ -54,19 +54,23 @@ export default function Sender({ sessionId }: Props) {
   const [battery, setBattery] = useState<BatteryInfo | null>(null);
 
   /* ---------------- SERVER-SIDE ISP DETECTION (Much Stronger) ---------------- */
+  /* ---------------- SERVER-SIDE ISP (Strongest Free Version) ---------------- */
   const fetchISP = async (): Promise<IPInfo | null> => {
-    console.info("🔍 Calling server for ISP detection...");
-    
+    console.info("🔍 Calling /api/isp ...");
+
     try {
       const res = await fetch("/api/isp", { 
         method: "GET",
-        cache: "no-store"
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" }
       });
-      
+
+      if (!res.ok) throw new Error("API error");
+
       const data = await res.json();
 
       if (data.org) {
-        console.info("✅ ISP detected:", data.org);
+        console.info("✅ ISP SUCCESS:", data.org, " | Source:", data.source);
         return {
           ip: data.ip,
           city: data.city,
@@ -76,10 +80,12 @@ export default function Sender({ sessionId }: Props) {
           source: data.source,
         };
       }
-    } catch (err) {
-      console.error("Server ISP fetch failed:", err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("❌ ISP API failed:", msg);
     }
 
+    console.warn("⚠️ ISP detection returned null");
     return null;
   };
 
