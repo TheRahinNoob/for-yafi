@@ -1,6 +1,6 @@
 "use client";
 
-import * as UAParser from "ua-parser-js";
+import * as UAParserModule from "ua-parser-js";
 
 export type DeviceInfo = {
   model: string;
@@ -18,41 +18,59 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
   let type = "Desktop";
 
   try {
-    // -----------------------------
-    // MODERN API (Chrome Android)
-    // -----------------------------
     const nav = navigator as any;
 
+    /* ---------------- MODERN CHROMIUM API ---------------- */
     if (nav.userAgentData?.getHighEntropyValues) {
-      const ua = await nav.userAgentData.getHighEntropyValues([
-        "model",
-        "platform",
-        "platformVersion",
-      ]);
+      try {
+        const ua = await nav.userAgentData.getHighEntropyValues([
+          "model",
+          "platform",
+          "platformVersion",
+        ]);
 
-      model = ua?.model || "Unknown";
-      os = ua?.platform || "Unknown";
+        model = ua?.model || "Unknown";
+        os = ua?.platform || "Unknown";
+      } catch {
+        // ignore modern API failure
+      }
     }
 
-    // -----------------------------
-    // FALLBACK (UAParser)
-    // -----------------------------
-    const parser = new (UAParser as any)();
+    /* ---------------- FIXED UA-PARSER INIT ---------------- */
+
+    const UAParser: any =
+      (UAParserModule as any).default || UAParserModule;
+
+    const parser = new UAParser(navigator.userAgent);
     const result = parser.getResult();
 
     const device = result.device;
     const osData = result.os;
     const browserData = result.browser;
 
-    brand = device.vendor || "Unknown";
-    model = model !== "Unknown" ? model : device.model || "Unknown";
+    /* ---------------- DEVICE INFO ---------------- */
 
-    os = os !== "Unknown" ? os : osData.name || "Unknown";
+    brand = device.vendor || "Unknown";
+
+    model =
+      model !== "Unknown"
+        ? model
+        : device.model || "Unknown";
+
+    os =
+      os !== "Unknown"
+        ? os
+        : osData.name || "Unknown";
+
     browser = browserData.name || "Unknown";
 
-    if (device.type === "mobile") type = "Mobile";
-    else if (device.type === "tablet") type = "Tablet";
-    else type = "Desktop";
+    if (device.type === "mobile") {
+      type = "Mobile";
+    } else if (device.type === "tablet") {
+      type = "Tablet";
+    } else {
+      type = "Desktop";
+    }
   } catch (err) {
     console.warn("Device detection failed:", err);
   }

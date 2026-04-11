@@ -30,18 +30,20 @@ type BatteryInfo = {
   charging?: boolean;
 };
 
+type IPInfo = {
+  ip?: string;
+  city?: string;
+  region?: string;
+  country?: string;
+  org?: string;
+  source?: string;
+};
+
 type NetworkInfo = {
   type?: string;
   downlink?: number;
   rtt?: number;
-
-  ipInfo?: {
-    ip?: string;
-    city?: string;
-    region?: string;
-    country?: string;
-    org?: string; // ISP
-  };
+  ipInfo?: IPInfo;
 };
 
 type SessionData = {
@@ -84,7 +86,7 @@ export default function TrackPage() {
     const sessionRef = ref(db, `sessions/${id}`);
 
     const unsubscribe = onValue(sessionRef, (snap) => {
-      const data: SessionData | null = snap.val();
+      const data = snap.val() as SessionData | null;
 
       if (!data) {
         setStatus("offline");
@@ -105,14 +107,14 @@ export default function TrackPage() {
       if (typeof data.pingMs === "number") setPing(data.pingMs);
       if (typeof data.accuracy === "number") setAccuracy(data.accuracy);
 
-      /* DEVICE / BATTERY */
+      /* DEVICE / BATTERY / NETWORK */
       setDevice(data.device ?? null);
       setBattery(data.battery ?? null);
       setNetwork(data.network ?? null);
 
       /* ONLINE/OFFLINE */
       const now = Date.now();
-      const lastTime = last ?? 0;
+      const lastTime = typeof last === "number" ? last : 0;
 
       const isOffline =
         data.status === "offline" || now - lastTime > 20000;
@@ -123,13 +125,9 @@ export default function TrackPage() {
     return () => unsubscribe();
   }, [id]);
 
-  /* ---------------- SAFE ISP EXTRACTOR ---------------- */
+  /* ---------------- SAFE ISP ---------------- */
 
-  const ipInfo =
-    network?.ipInfo ??
-    (network as any)?.ip ??
-    (network as any)?.ispLayer ??
-    null;
+  const ipInfo = network?.ipInfo ?? null;
 
   /* ---------------- CONNECTION SCORE ---------------- */
 
@@ -285,7 +283,7 @@ export default function TrackPage() {
               <p>RTT: {network.rtt ?? "?"} ms</p>
 
               <div style={styles.subSection}>
-                <p style={{ fontWeight: 600 }}>🌍 ISP / Location Layer</p>
+                <p style={{ fontWeight: 600 }}>🌍 ISP Layer</p>
 
                 <p>ISP: {ipInfo?.org ?? "Not detected"}</p>
                 <p>City: {ipInfo?.city ?? "Unknown"}</p>
