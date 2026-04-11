@@ -1,71 +1,173 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export async function GET(request: NextRequest) {
-  // 🔥 GET THE REAL USER'S IP (this was missing)
-  const forwardedFor = request.headers.get("x-forwarded-for");
+/* ---------------- HELPERS ---------------- */
+
+function getClientIp(request: NextRequest) {
+  const forwarded = request.headers.get("x-forwarded-for");
   const realIp = request.headers.get("x-real-ip");
 
-  const clientIp =
-    forwardedFor?.split(",")[0]?.trim() ||
+  const ip =
+    forwarded?.split(",")[0]?.trim() ||
     realIp ||
-    "unknown";
+    "";
 
-  console.log("🌍 Real Client IP detected:", clientIp);
+  // 🚨 block invalid cases
+  if (!ip || ip === "unknown" || ip.includes("::1")) {
+    return null;
+  }
 
-  // Best API for Bangladesh mobile carriers (Grameenphone, Banglalink, Robi, Airtel)
-  const apis = [
-    `https://ip-api.com/json/${clientIp}?fields=status,message,query,city,regionName,country,isp,org,as`,
-    "https://freeipapi.com/json/",
-    "https://ipwho.is/",
+  return ip;
+}
+
+/* ---------------- ISP FILTER (IMPORTANT) ---------------- */
+
+function isDatacenterISP(isp: string = "") {
+  const badKeywords = [
+    "amazon",
+    "aws",
+    "google",
+    "microsoft",
+    "azure",
+    "cloudflare",
+    "digitalocean",
+    "linode",
+    "vultr",
+    "ovh",
+    "hosting",
   ];
 
-  for (const url of apis) {
+  return badKeywords.some((k) =>
+    isp.toLowerCase().includes(k)
+  );
+}
+
+/* ---------------- MAIN API ---------------- */
+
+export async function GET(request: NextRequest) {
+  const clientIp = getClientIp(request);
+
+  console.log("🌍 Client IP:", clientIp);
+
+  if (!clientIp) {
+    return NextResponse.json({
+      org: "Unknown ISP",
+      source: "no-ip",
+    });
+  }
+
+  /* ---------------- PRIMARY API (MOST RELIABLE) ---------------- */
+
+  const tryIpApi = async () => {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 6000);
-
-      const res = await fetch(url, {
-        signal: controller.signal,
-        cache: "no-store",
-      });
-
-      clearTimeout(timeout);
-
-      if (!res.ok) continue;
+      const res = await fetch(
+        `http://ip-api.com/json/${clientIp}?fields=status,message,query,country,regionName,city,isp,org,as`,
+        { cache: "no-store" }
+      );
 
       const data = await res.json();
 
-      let ispName =
+      if (data.status !== "success") return null;
+
+      const isp =
         data.isp ||
         data.org ||
-        data.connection?.isp ||
-        data.provider ||
-        data.asn?.name;
+        "";
 
-      if (ispName && typeof ispName === "string" && ispName.length > 3) {
-        console.log(`✅ ISP FOUND: ${ispName} (via ${url})`);
+      if (!isp) return null;
 
-        return NextResponse.json({
-          ip: data.query || data.ip || clientIp,
-          city: data.city || data.cityName,
-          region: data.regionName || data.region,
-          country: data.country || data.country_name,
-          org: ispName,
-          source: url.includes("ip-api.com")
-            ? "ip-api.com"
-            : url.includes("freeipapi")
-            ? "freeipapi.com"
-            : "ipwho.is",
-        });
+      // 🚨 filter datacenter ISP
+      if (isDatacenterISP(isp)) {
+        console.warn("⚠️ Datacenter ISP blocked:", isp);
+        return null;
       }
-    } catch (err) {
-      console.warn(`API failed: ${url}`, err);
+
+      return {
+        ip: data.query,
+        city: data.city,
+        region: data.regionName,
+        country: data.country,
+        org: isp,
+        source: "ip-api",
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  /* ---------------- SECONDARY API ---------------- */
+
+  const tryIpWho = async () => {
+    try {
+      const res = await fetch(
+        `https://ipwho.is/${clientIp}`,
+        { cache: "no-store" }
+      );
+
+      const data = await res.json();
+
+      if (!data.success) return null;
+
+      const isp = data.connection?.isp;
+
+      if (!isp || isDatacenterISP(isp)) return null;
+
+      return {
+        ip: data.ip,
+        city: data.city,
+        region: data.region,
+        country: data.country,
+        org: isp,
+        source: "ipwho",
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  /* ---------------- EXECUTION ORDER ---------------- */
+
+  const result =
+    (await tryIpApi()) ||
+    (await tryIpWho());
+
+  /* ---------------- BANGLADESH BOOST LAYER ---------------- */
+
+  if (result?.org) {
+    const lower = result.org.toLowerCase();
+
+    if (
+      lower.includes("grameen") ||
+      lower.includes("gp") ||
+      lower.includes("telenor")
+    ) {
+      result.org = "Grameenphone (GP)";
+    }
+
+    if (lower.includes("banglalink")) {
+      result.org = "Banglalink";
+    }
+
+    if (lower.includes("robi")) {
+      result.org = "Robi Axiata";
+    }
+
+    if (lower.includes("airtel")) {
+      result.org = "Airtel Bangladesh";
+    }
+
+    if (lower.includes("teletalk")) {
+      result.org = "Teletalk";
     }
   }
 
-  console.warn("⚠️ All ISP APIs failed");
-  return NextResponse.json({
-    org: "Unknown ISP",
-    source: "failed",
-  });
+  /* ---------------- FINAL FALLBACK ---------------- */
+
+  if (!result) {
+    return NextResponse.json({
+      org: "Unknown ISP",
+      source: "failed",
+    });
+  }
+
+  return NextResponse.json(result);
 }
