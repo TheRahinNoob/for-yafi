@@ -1,9 +1,9 @@
 /**
  * ██████████████████████████████████████████████████████████████
- * DEVICE DETECTOR – ULTRA SPY GRADE EDITION (v5.3)
+ * DEVICE DETECTOR – ULTRA SPY GRADE EDITION (v5.4)
  * 
- * Fixed: Brand "Unknown" + CPU generic on modern Chrome (UA reduction)
- * Now correctly shows Samsung + MediaTek on SM-A225F
+ * Fixed: RAM now clearly marked as APPROXIMATE (privacy limitation)
+ * Samsung + MediaTek CPU already perfect
  * Fully TypeScript-error-free
  * ██████████████████████████████████████████████████████████████
  */
@@ -24,7 +24,8 @@ export type DeviceInfo = {
 
   // Hardware
   cpuCores?: number;
-  ramGB?: number;
+  ramGB?: number;           // ← now approximate (see ramGBApprox)
+  ramGBApprox?: boolean;    // ← NEW: tells frontend it's not exact
   cpuModelHint?: string;
   webGLVendor?: string;
   webGLRenderer?: string;
@@ -139,7 +140,7 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       info.browserVersion = result.browser.version;
     }
 
-    /* ==================== 3. BRAND FIX (works even with Chrome UA reduction) ==================== */
+    /* ==================== 3. BRAND FIX ==================== */
     if (info.brand === "Unknown" || info.brand === "") {
       const modelLower = info.model.toLowerCase();
       if (modelLower.startsWith("sm-") || ua.includes("SAMSUNG")) {
@@ -149,16 +150,19 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       else if (modelLower.includes("pixel")) info.brand = "Google";
     }
 
-    /* ==================== 4. HARDWARE (CPU hint now detects MediaTek on reduced UA) ==================== */
+    /* ==================== 4. HARDWARE (RAM now marked approximate) ==================== */
     info.cpuCores = nav.hardwareConcurrency || undefined;
-    if (nav.deviceMemory) info.ramGB = nav.deviceMemory;
+    if (nav.deviceMemory) {
+      info.ramGB = nav.deviceMemory;
+      info.ramGBApprox = true;          // ← tells your UI it's approximate
+    }
 
-    // Smart CPU detection
+    // Smart CPU detection (already fixed in v5.3)
     if (ua.includes("Intel")) info.cpuModelHint = "Intel";
     else if (ua.includes("AMD")) info.cpuModelHint = "AMD";
     else if (info.os.toLowerCase().includes("android")) {
       if (info.webGLRenderer?.toLowerCase().includes("mali") || info.webGLVendor?.toLowerCase().includes("arm")) {
-        info.cpuModelHint = "MediaTek";           // catches your Mali-G52
+        info.cpuModelHint = "MediaTek";
       } else if (ua.includes("Exynos")) info.cpuModelHint = "Exynos";
       else if (ua.includes("Snapdragon") || ua.includes("SM")) info.cpuModelHint = "Snapdragon";
       else info.cpuModelHint = "ARM (Mobile)";
@@ -166,9 +170,7 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       info.cpuModelHint = "Apple Silicon";
     }
 
-    /* ==================== 5-12. (unchanged – WebGL, Display, Preferences, Fingerprints, etc.) ==================== */
-    // ... [the rest of the file is identical to v5.2 from section 5 onwards]
-
+    /* ==================== 5. WEBGL GPU ==================== */
     try {
       const canvas = document.createElement("canvas");
       let gl: WebGLRenderingContext | null = null;
@@ -187,6 +189,7 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       }
     } catch {}
 
+    /* ==================== 6. DISPLAY ==================== */
     info.screenWidth = window.screen.width;
     info.screenHeight = window.screen.height;
     info.availWidth = window.screen.availWidth;
@@ -202,6 +205,7 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       : "sRGB";
     info.isHDR = info.colorGamut !== "sRGB";
 
+    /* ==================== 7. SYSTEM PREFERENCES ==================== */
     info.language = navigator.language || undefined;
     info.languages = navigator.languages || [];
     try {
@@ -214,14 +218,17 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
     info.doNotTrack = navigator.doNotTrack || null;
     info.cookieEnabled = navigator.cookieEnabled;
 
+    /* ==================== 8. BROWSER & PLATFORM ==================== */
     info.platform = navigator.platform;
     info.vendor = navigator.vendor;
 
+    /* ==================== 9. MOBILE / DESKTOP SPECIFIC ==================== */
     info.touchPoints = nav.maxTouchPoints || 0;
     info.isTouchDevice = (info.touchPoints ?? 0) > 0;
     info.isStandalone = window.matchMedia("(display-mode: standalone)").matches;
     info.isMobileApp = info.isStandalone || (typeof (navigator as any).standalone !== "undefined" && (navigator as any).standalone === true);
 
+    /* ==================== 10. DEVICE TYPE ==================== */
     if (result.device?.type === "mobile" || (info.touchPoints ?? 0) > 2) {
       info.type = "Mobile";
     } else if (result.device?.type === "tablet") {
@@ -230,6 +237,7 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       info.type = "Desktop";
     }
 
+    /* ==================== 11. FINGERPRINTS ==================== */
     try {
       const c = document.createElement("canvas");
       const ctx = c.getContext("2d");
@@ -265,9 +273,10 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       info.audioFingerprint = simpleHash(audioHash);
     } catch {}
 
+    /* ==================== 12. RAW UA ==================== */
     info.userAgent = ua.substring(0, 300);
 
-    console.info("🕵️‍♂️ [DEVICE DETECTOR v5.3] Full Profile Captured:", info);
+    console.info("🕵️‍♂️ [DEVICE DETECTOR v5.4] Full Profile Captured:", info);
   } catch (err) {
     console.warn("❌ Device detection failed partially:", err);
   }
