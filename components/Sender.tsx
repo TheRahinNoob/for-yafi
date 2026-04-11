@@ -13,20 +13,13 @@ type Coords = {
   accuracy: number;
 };
 
-type NetworkInfo = {
-  type?: string;
-  downlink?: number;
-  rtt?: number;
-  ipInfo?: IPInfo;
-};
-
 type IPInfo = {
   ip?: string;
   city?: string;
   region?: string;
   country?: string;
-  org?: string; // ISP
-  source?: string; // which API won
+  org?: string;
+  source?: string;
 };
 
 type BatteryInfo = {
@@ -34,6 +27,12 @@ type BatteryInfo = {
   charging?: boolean;
 };
 
+type NetworkInfo = {
+  type?: string;
+  downlink?: number;
+  rtt?: number;
+  ipInfo?: IPInfo;   // 🔥 ADD THIS BACK
+};
 type Props = {
   sessionId: string;
 };
@@ -69,10 +68,13 @@ export default function Sender({ sessionId }: Props) {
     (async () => {
       const info = await getDeviceInfo();
       setDevice(info);
-      update(sessionRef, { device: info });
+
+      update(sessionRef, {
+        device: info,
+      });
     })();
 
-    /* ---------------- LAYER 1: BROWSER NETWORK ---------------- */
+    /* ---------------- NETWORK BASE ---------------- */
     const conn =
       (navigator as any).connection ||
       (navigator as any).mozConnection ||
@@ -87,12 +89,16 @@ export default function Sender({ sessionId }: Props) {
       : {};
 
     setNetwork(baseNetwork);
-    update(sessionRef, { network: baseNetwork });
 
-    /* ---------------- LAYER 2 + 3: ISP DETECTION ---------------- */
+    update(sessionRef, {
+      "network/type": baseNetwork.type ?? null,
+      "network/downlink": baseNetwork.downlink ?? null,
+      "network/rtt": baseNetwork.rtt ?? null,
+    });
+
+    /* ---------------- ISP DETECTION ---------------- */
 
     const fetchISP = async (): Promise<IPInfo | null> => {
-      // Layer 2
       try {
         const res = await fetch("https://ipapi.co/json/");
         const data = await res.json();
@@ -109,7 +115,6 @@ export default function Sender({ sessionId }: Props) {
         }
       } catch {}
 
-      // Layer 3 fallback
       try {
         const res = await fetch("https://ipwho.is/");
         const data = await res.json();
@@ -131,17 +136,16 @@ export default function Sender({ sessionId }: Props) {
 
     const runISP = async () => {
       const ipInfo = await fetchISP();
-
       if (!ipInfo) return;
 
-      setNetwork((prev) => {
-        const updated: NetworkInfo = {
-          ...prev,
-          ipInfo,
-        };
+      setNetwork((prev) => ({
+        ...prev,
+        ipInfo,
+      }));
 
-        update(sessionRef, { network: updated });
-        return updated;
+      // 🔥 CRITICAL FIX: atomic write (no overwrite bug)
+      update(sessionRef, {
+        "network/ipInfo": ipInfo,
       });
     };
 
@@ -160,7 +164,10 @@ export default function Sender({ sessionId }: Props) {
           };
 
           setBattery(info);
-          update(sessionRef, { battery: info });
+
+          update(sessionRef, {
+            battery: info,
+          });
         };
 
         pushBattery();
@@ -281,7 +288,6 @@ export default function Sender({ sessionId }: Props) {
         </p>
       )}
 
-      {/* ISP LAYER DEBUG */}
       {network?.ipInfo && (
         <div style={{ marginTop: 10 }}>
           <p>IP: {network.ipInfo.ip}</p>
@@ -308,8 +314,8 @@ export default function Sender({ sessionId }: Props) {
 
       {battery && (
         <p>
-          Battery: {Math.round((battery.level || 0) * 100)}%{" "}
-          {battery.charging ? "⚡ charging" : ""}
+          Battery: {Math.round((battery.level || 0) * 100)}%
+          {battery.charging ? " ⚡ charging" : ""}
         </p>
       )}
     </div>
