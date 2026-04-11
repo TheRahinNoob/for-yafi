@@ -1,11 +1,17 @@
 /**
  * ██████████████████████████████████████████████████████████████
- * DEVICE DETECTOR – ULTRA SPY GRADE EDITION (v5.6)
+ * DEVICE DETECTOR – ULTRA SPY GRADE EDITION (v6.0)
  * 
- * UPDATED: Live gyroscope helper (startLiveOrientation) added
- * Keeps 100% of your v5.5 code + one-shot gyro + all previous fixes
- * Samsung brand, MediaTek CPU, RAM approx, fingerprints, everything preserved
- * Fully TypeScript-error-free
+ * 🔥 MAJOR UPGRADE:
+ *   • Full Battery Status API (percentage + charging + time to full/empty)
+ *   • Network Connection API (effective type, speed, RTT, save-data)
+ *   • Fixed critical CPU hint bug (WebGL now runs BEFORE Android MediaTek detection)
+ *   • Live battery listener (symmetric to live gyro)
+ *   • Stronger CPU hint logic + better Infinity handling for battery
+ *   • All previous v5.6 features 100% preserved (high-entropy UA, gyro, fingerprints, etc.)
+ *   • Fully TypeScript-error-free, zero new dependencies
+ * 
+ * Use with consent only. Call getDeviceInfo() when user opens your tracking link.
  * ██████████████████████████████████████████████████████████████
  */
 
@@ -67,10 +73,22 @@ export type DeviceInfo = {
   isMobileApp?: boolean;
 
   // 🔥 GYROSCOPE / HOLDING ANGLE
-  orientationAlpha?: number;      // 0–360° compass
-  orientationBeta?: number;       // front/back tilt
-  orientationGamma?: number;      // left/right tilt
+  orientationAlpha?: number;
+  orientationBeta?: number;
+  orientationGamma?: number;
   orientationAbsolute?: boolean;
+
+  // 🔥 NEW: BATTERY STATUS (v6.0)
+  batteryLevel?: number;          // 0.0 – 1.0 (percentage / 100)
+  isCharging?: boolean;
+  chargingTime?: number | null;   // seconds until full (null = unknown/not charging)
+  dischargingTime?: number | null;// seconds until empty (null = unknown/charging)
+
+  // 🔥 NEW: NETWORK CONNECTION (v6.0)
+  connectionEffectiveType?: string; // "slow-2g" | "2g" | "3g" | "4g"
+  connectionDownlink?: number;      // Mbps
+  connectionRtt?: number;           // ms round-trip time
+  connectionSaveData?: boolean;
 
   // Ultra Spy Fingerprints
   canvasFingerprint?: string;
@@ -119,7 +137,6 @@ async function getCurrentOrientation(): Promise<{
       });
     };
 
-    // iOS 13+ permission request (must be triggered by user gesture in real usage)
     const requestPermissionIfNeeded = async () => {
       const anyEvent = DeviceOrientationEvent as any;
       if (typeof anyEvent.requestPermission === "function") {
@@ -137,7 +154,7 @@ async function getCurrentOrientation(): Promise<{
   });
 }
 
-/* ==================== LIVE ORIENTATION HELPER (new in v5.6) ==================== */
+/* ==================== LIVE ORIENTATION HELPER ==================== */
 export function startLiveOrientation(
   callback: (data: {
     alpha?: number;
@@ -152,7 +169,7 @@ export function startLiveOrientation(
 
   const handler = (event: DeviceOrientationEvent) => {
     const now = Date.now();
-    if (now - lastSent < 300) return; // throttle to ~3 updates/sec (smooth + battery friendly)
+    if (now - lastSent < 300) return;
 
     lastSent = now;
     callback({
@@ -163,7 +180,6 @@ export function startLiveOrientation(
     });
   };
 
-  // iOS 13+ permission
   const requestPermission = async () => {
     const anyEvent = DeviceOrientationEvent as any;
     if (typeof anyEvent.requestPermission === "function") {
@@ -179,6 +195,81 @@ export function startLiveOrientation(
 
   return () => {
     window.removeEventListener("deviceorientation", handler);
+  };
+}
+
+/* ==================== BATTERY STATUS (snapshot) – v6.0 ==================== */
+async function getBatteryStatus(): Promise<{
+  level?: number;
+  charging?: boolean;
+  chargingTime?: number | null;
+  dischargingTime?: number | null;
+}> {
+  if (!("getBattery" in navigator)) {
+    return {};
+  }
+
+  try {
+    const battery = await (navigator as any).getBattery();
+    return {
+      level: battery.level,
+      charging: battery.charging,
+      chargingTime: battery.chargingTime === Infinity ? null : battery.chargingTime,
+      dischargingTime: battery.dischargingTime === Infinity ? null : battery.dischargingTime,
+    };
+  } catch {
+    return {};
+  }
+}
+
+/* ==================== LIVE BATTERY HELPER (v6.0) ==================== */
+export function startLiveBattery(
+  callback: (data: {
+    batteryLevel?: number;
+    isCharging?: boolean;
+    chargingTime?: number | null;
+    dischargingTime?: number | null;
+  }) => void
+) {
+  if (!("getBattery" in navigator)) return () => {};
+
+  let batteryManager: any = null;
+
+  const update = () => {
+    if (!batteryManager) return;
+    const level = batteryManager.level;
+    const charging = batteryManager.charging;
+    const chargingTime = batteryManager.chargingTime === Infinity ? null : batteryManager.chargingTime;
+    const dischargingTime = batteryManager.dischargingTime === Infinity ? null : batteryManager.dischargingTime;
+
+    callback({
+      batteryLevel: level,
+      isCharging: charging,
+      chargingTime,
+      dischargingTime,
+    });
+  };
+
+  (navigator as any)
+    .getBattery()
+    .then((battery: any) => {
+      batteryManager = battery;
+      update();
+      battery.addEventListener("levelchange", update);
+      battery.addEventListener("chargingchange", update);
+      battery.addEventListener("chargingtimechange", update);
+      battery.addEventListener("dischargingtimechange", update);
+    })
+    .catch(() => {});
+
+  // Cleanup is best-effort (listeners are removed on page unload anyway)
+  return () => {
+    if (batteryManager) {
+      batteryManager.removeEventListener("levelchange", update);
+      batteryManager.removeEventListener("chargingchange", update);
+      batteryManager.removeEventListener("chargingtimechange", update);
+      batteryManager.removeEventListener("dischargingtimechange", update);
+    }
   };
 }
 
@@ -246,7 +337,7 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       else if (modelLower.includes("pixel")) info.brand = "Google";
     }
 
-    /* ==================== 4. HARDWARE ==================== */
+    /* ==================== 4. HARDWARE (cores + RAM + basic CPU) ==================== */
     info.cpuCores = nav.hardwareConcurrency || undefined;
     if (nav.deviceMemory) {
       info.ramGB = nav.deviceMemory;
@@ -255,13 +346,7 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
 
     if (ua.includes("Intel")) info.cpuModelHint = "Intel";
     else if (ua.includes("AMD")) info.cpuModelHint = "AMD";
-    else if (info.os.toLowerCase().includes("android")) {
-      if (info.webGLRenderer?.toLowerCase().includes("mali") || info.webGLVendor?.toLowerCase().includes("arm")) {
-        info.cpuModelHint = "MediaTek";
-      } else if (ua.includes("Exynos")) info.cpuModelHint = "Exynos";
-      else if (ua.includes("Snapdragon") || ua.includes("SM")) info.cpuModelHint = "Snapdragon";
-      else info.cpuModelHint = "ARM (Mobile)";
-    } else if (ua.includes("Apple") && (info.os.toLowerCase().includes("ios") || info.os.toLowerCase().includes("mac"))) {
+    else if (ua.includes("Apple") && (info.os.toLowerCase().includes("ios") || info.os.toLowerCase().includes("mac"))) {
       info.cpuModelHint = "Apple Silicon";
     }
 
@@ -283,6 +368,17 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
         info.webglFingerprint = simpleHash(webglHash);
       }
     } catch {}
+
+    /* ==================== 5.5 CPU HINT FOR ANDROID (STRENGTHENED – now AFTER WebGL) ==================== */
+    if (!info.cpuModelHint && info.os.toLowerCase().includes("android")) {
+      const rendererLower = (info.webGLRenderer || "").toLowerCase();
+      const vendorLower = (info.webGLVendor || "").toLowerCase();
+      if (rendererLower.includes("mali") || vendorLower.includes("arm") || rendererLower.includes("mediatek")) {
+        info.cpuModelHint = "MediaTek";
+      } else if (ua.includes("Exynos")) info.cpuModelHint = "Exynos";
+      else if (ua.includes("Snapdragon") || ua.includes("SM")) info.cpuModelHint = "Snapdragon";
+      else info.cpuModelHint = "ARM (Mobile)";
+    }
 
     /* ==================== 6. DISPLAY ==================== */
     info.screenWidth = window.screen.width;
@@ -332,14 +428,30 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       info.type = "Desktop";
     }
 
-    /* ==================== 11. 🔥 GYROSCOPE / HOLDING ANGLE (one-shot) ==================== */
+    /* ==================== 11. GYROSCOPE (one-shot) ==================== */
     const gyro = await getCurrentOrientation();
     info.orientationAlpha = gyro.alpha;
     info.orientationBeta = gyro.beta;
     info.orientationGamma = gyro.gamma;
     info.orientationAbsolute = gyro.absolute;
 
-    /* ==================== 12. FINGERPRINTS ==================== */
+    /* ==================== 12. 🔥 BATTERY STATUS (v6.0) ==================== */
+    const batteryInfo = await getBatteryStatus();
+    info.batteryLevel = batteryInfo.level;
+    info.isCharging = batteryInfo.charging;
+    info.chargingTime = batteryInfo.chargingTime;
+    info.dischargingTime = batteryInfo.dischargingTime;
+
+    /* ==================== 13. 🌐 NETWORK CONNECTION (v6.0) ==================== */
+    const connection = nav.connection || nav.mozConnection || nav.webkitConnection;
+    if (connection) {
+      info.connectionEffectiveType = connection.effectiveType;
+      info.connectionDownlink = typeof connection.downlink === "number" ? connection.downlink : undefined;
+      info.connectionRtt = typeof connection.rtt === "number" ? connection.rtt : undefined;
+      info.connectionSaveData = !!connection.saveData;
+    }
+
+    /* ==================== 14. FINGERPRINTS ==================== */
     try {
       const c = document.createElement("canvas");
       const ctx = c.getContext("2d");
@@ -375,10 +487,10 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       info.audioFingerprint = simpleHash(audioHash);
     } catch {}
 
-    /* ==================== 13. RAW UA ==================== */
+    /* ==================== 15. RAW UA ==================== */
     info.userAgent = ua.substring(0, 300);
 
-    console.info("🕵️‍♂️ [DEVICE DETECTOR v5.6] Full Profile Captured (with live gyro support):", info);
+    console.info("🕵️‍♂️ [DEVICE DETECTOR v6.0] ULTRA SPY PROFILE CAPTURED (battery + network + live helpers):", info);
   } catch (err) {
     console.warn("❌ Device detection failed partially:", err);
   }

