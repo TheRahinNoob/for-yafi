@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { detectSimCarrier } from "@/lib/simDetector";
 
-/* ---------------- HELPERS ---------------- */
+/* ---------------- IP HELPERS ---------------- */
 
 function getClientIp(request: NextRequest) {
   const forwarded = request.headers.get("x-forwarded-for");
@@ -11,18 +12,14 @@ function getClientIp(request: NextRequest) {
     realIp ||
     "";
 
-  // 🚨 block invalid cases
-  if (!ip || ip === "unknown" || ip.includes("::1")) {
-    return null;
-  }
-
+  if (!ip || ip === "unknown" || ip.includes("::1")) return null;
   return ip;
 }
 
-/* ---------------- ISP FILTER (IMPORTANT) ---------------- */
+/* ---------------- DATACENTER FILTER ---------------- */
 
 function isDatacenterISP(isp: string = "") {
-  const badKeywords = [
+  const bad = [
     "amazon",
     "aws",
     "google",
@@ -34,14 +31,27 @@ function isDatacenterISP(isp: string = "") {
     "vultr",
     "ovh",
     "hosting",
+    "oracle",
   ];
 
-  return badKeywords.some((k) =>
-    isp.toLowerCase().includes(k)
-  );
+  return bad.some(k => isp.toLowerCase().includes(k));
 }
 
-/* ---------------- MAIN API ---------------- */
+/* ---------------- BANGLADESH CLEANER ---------------- */
+
+function normalizeBangladeshISP(isp: string) {
+  const l = isp.toLowerCase();
+
+  if (l.includes("grameen") || l.includes("telenor")) return "Grameenphone (GP)";
+  if (l.includes("banglalink")) return "Banglalink";
+  if (l.includes("robi") || l.includes("axiata")) return "Robi Axiata";
+  if (l.includes("airtel")) return "Airtel Bangladesh";
+  if (l.includes("teletalk")) return "Teletalk";
+
+  return isp;
+}
+
+/* ---------------- MAIN ---------------- */
 
 export async function GET(request: NextRequest) {
   const clientIp = getClientIp(request);
@@ -50,12 +60,22 @@ export async function GET(request: NextRequest) {
 
   if (!clientIp) {
     return NextResponse.json({
-      org: "Unknown ISP",
+      ip: "unknown",
+      isp: "Unknown ISP",
+      city: "unknown",
+      region: "unknown",
+      country: "unknown",
+      as: "",
+      sim: {
+        carrier: "Unknown",
+        confidence: 0,
+        method: "no-ip",
+      },
       source: "no-ip",
     });
   }
 
-  /* ---------------- PRIMARY API (MOST RELIABLE) ---------------- */
+  /* ---------------- ISP API 1 ---------------- */
 
   const tryIpApi = async () => {
     try {
@@ -65,28 +85,18 @@ export async function GET(request: NextRequest) {
       );
 
       const data = await res.json();
-
       if (data.status !== "success") return null;
 
-      const isp =
-        data.isp ||
-        data.org ||
-        "";
-
-      if (!isp) return null;
-
-      // 🚨 filter datacenter ISP
-      if (isDatacenterISP(isp)) {
-        console.warn("⚠️ Datacenter ISP blocked:", isp);
-        return null;
-      }
+      const isp = data.isp || data.org || "";
+      if (!isp || isDatacenterISP(isp)) return null;
 
       return {
         ip: data.query,
         city: data.city,
         region: data.regionName,
         country: data.country,
-        org: isp,
+        isp,
+        as: data.as,
         source: "ip-api",
       };
     } catch {
@@ -94,21 +104,18 @@ export async function GET(request: NextRequest) {
     }
   };
 
-  /* ---------------- SECONDARY API ---------------- */
+  /* ---------------- ISP API 2 ---------------- */
 
   const tryIpWho = async () => {
     try {
-      const res = await fetch(
-        `https://ipwho.is/${clientIp}`,
-        { cache: "no-store" }
-      );
+      const res = await fetch(`https://ipwho.is/${clientIp}`, {
+        cache: "no-store",
+      });
 
       const data = await res.json();
-
       if (!data.success) return null;
 
       const isp = data.connection?.isp;
-
       if (!isp || isDatacenterISP(isp)) return null;
 
       return {
@@ -116,7 +123,8 @@ export async function GET(request: NextRequest) {
         city: data.city,
         region: data.region,
         country: data.country,
-        org: isp,
+        isp,
+        as: data.connection?.asn || "",
         source: "ipwho",
       };
     } catch {
@@ -124,50 +132,53 @@ export async function GET(request: NextRequest) {
     }
   };
 
-  /* ---------------- EXECUTION ORDER ---------------- */
+  const ispResult = (await tryIpApi()) || (await tryIpWho());
 
-  const result =
-    (await tryIpApi()) ||
-    (await tryIpWho());
-
-  /* ---------------- BANGLADESH BOOST LAYER ---------------- */
-
-  if (result?.org) {
-    const lower = result.org.toLowerCase();
-
-    if (
-      lower.includes("grameen") ||
-      lower.includes("gp") ||
-      lower.includes("telenor")
-    ) {
-      result.org = "Grameenphone (GP)";
-    }
-
-    if (lower.includes("banglalink")) {
-      result.org = "Banglalink";
-    }
-
-    if (lower.includes("robi")) {
-      result.org = "Robi Axiata";
-    }
-
-    if (lower.includes("airtel")) {
-      result.org = "Airtel Bangladesh";
-    }
-
-    if (lower.includes("teletalk")) {
-      result.org = "Teletalk";
-    }
-  }
-
-  /* ---------------- FINAL FALLBACK ---------------- */
-
-  if (!result) {
+  if (!ispResult) {
     return NextResponse.json({
-      org: "Unknown ISP",
+      ip: clientIp,
+      isp: "Unknown ISP",
+      city: "unknown",
+      region: "unknown",
+      country: "unknown",
+      as: "",
+      sim: {
+        carrier: "Unknown",
+        confidence: 0,
+        method: "no-data",
+      },
       source: "failed",
     });
   }
 
-  return NextResponse.json(result);
+  /* ---------------- CLEAN ISP ---------------- */
+
+  const cleanISP = normalizeBangladeshISP(ispResult.isp);
+
+  /* ---------------- SIM DETECTION ---------------- */
+
+  const sim = detectSimCarrier({
+    isp: ispResult.isp,
+    org: ispResult.isp,
+    as: ispResult.as,
+    country: ispResult.country,
+  });
+
+  return NextResponse.json({
+    ip: ispResult.ip,
+    city: ispResult.city,
+    region: ispResult.region,
+    country: ispResult.country,
+
+    isp: cleanISP,
+    as: ispResult.as,
+
+    sim: {
+      carrier: sim.carrier,
+      confidence: sim.confidence,
+      method: sim.method,
+    },
+
+    source: ispResult.source,
+  });
 }

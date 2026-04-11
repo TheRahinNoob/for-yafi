@@ -15,93 +15,81 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
   let brand = "Unknown";
   let os = "Unknown";
   let browser = "Unknown";
-  let type = "Desktop";
+  let type: "Mobile" | "Tablet" | "Desktop" = "Desktop";
 
   try {
     const nav = navigator as any;
 
-    /* ---------------- ULTRA MODE: Modern High-Entropy API (Chrome/Edge/Android) ---------------- */
+    /* ---------------- MODERN CHROME API ---------------- */
     if (nav.userAgentData?.getHighEntropyValues) {
       try {
-        const highEntropy = await nav.userAgentData.getHighEntropyValues([
+        const data = await nav.userAgentData.getHighEntropyValues([
           "model",
           "platform",
           "platformVersion",
-          "architecture",
-          "bitness",
-          "fullVersionList",
         ]);
 
-        if (highEntropy.model && highEntropy.model !== "") {
-          model = highEntropy.model;
-        }
-        if (highEntropy.platform) {
-          os = highEntropy.platform;
-        }
-        if (highEntropy.platformVersion) {
-          os += ` ${highEntropy.platformVersion}`;
-        }
-      } catch (err) {
-        console.warn("High-entropy API failed (normal on some browsers)", err);
+        if (data.model) model = data.model;
+        if (data.platform) os = data.platform;
+        if (data.platformVersion) os += ` ${data.platformVersion}`;
+      } catch {
+        // ignore
       }
     }
 
-    /* ---------------- FIXED UA-PARSER INIT (works with both ESM and CommonJS) ---------------- */
+    /* ---------------- FIX: UAParser SAFE INIT ---------------- */
     const UAParser: any =
-      (UAParserModule as any).default || UAParserModule;
+      (UAParserModule as any).default ??
+      (UAParserModule as any).UAParser ??
+      UAParserModule;
 
-    const parser = new UAParser(navigator.userAgent);
+    const parser =
+      typeof UAParser === "function"
+        ? new UAParser()
+        : new (UAParser as any)();
+
     const result = parser.getResult();
 
-    const deviceData = result.device;
-    const osData = result.os;
-    const browserData = result.browser;
+    const device = result.device || {};
+    const osData = result.os || {};
+    const browserData = result.browser || {};
 
-    /* ---------------- BRAND & MODEL (Ultra fallback logic) ---------------- */
-    if (deviceData.vendor && deviceData.vendor !== "unknown") {
-      brand = deviceData.vendor;
+    /* ---------------- BRAND ---------------- */
+    brand = device.vendor || "Unknown";
+
+    /* ---------------- MODEL ---------------- */
+    if (model === "Unknown") {
+      model = device.model || "Unknown";
     }
 
-    // If model is still Unknown, use UA-Parser model
-    if (model === "Unknown" || model === "") {
-      model = deviceData.model || "Unknown";
+    /* ---------------- SMART FALLBACKS ---------------- */
+    const ua = navigator.userAgent;
+
+    if (model === "Unknown") {
+      if (ua.includes("SM-")) model = "Samsung Galaxy";
+      else if (ua.includes("RMX")) model = "Realme";
+      else if (ua.includes("Redmi")) model = "Xiaomi Redmi";
     }
 
-    // Special BD/common device improvements
-    if (model === "Unknown" && navigator.userAgent.includes("SM-")) {
-      model = "Samsung Galaxy";
-    } else if (model === "Unknown" && navigator.userAgent.includes("RMX")) {
-      model = "Realme";
-    } else if (model === "Unknown" && navigator.userAgent.includes("Redmi")) {
-      model = "Xiaomi Redmi";
-    }
-
-    /* ---------------- OS (Ultra fallback) ---------------- */
-    if (os === "Unknown" || os === "") {
+    /* ---------------- OS ---------------- */
+    if (os === "Unknown") {
       os = osData.name || "Unknown";
       if (osData.version) os += ` ${osData.version}`;
     }
 
     /* ---------------- BROWSER ---------------- */
-    if (browserData.name) {
-      browser = browserData.name;
-      if (browserData.version) browser += ` ${browserData.version}`;
+    browser = browserData.name || "Unknown";
+    if (browserData.version) {
+      browser += ` ${browserData.version}`;
     }
 
-    /* ---------------- DEVICE TYPE (Ultra accurate) ---------------- */
-    if (deviceData.type === "mobile" || deviceData.type === "wearable") {
-      type = "Mobile";
-    } else if (deviceData.type === "tablet") {
-      type = "Tablet";
-    } else if (navigator.maxTouchPoints > 2 || "ontouchstart" in window) {
-      // Extra touch detection for hybrid devices
-      type = "Mobile";
-    } else {
-      type = "Desktop";
-    }
+    /* ---------------- DEVICE TYPE ---------------- */
+    if (device.type === "mobile") type = "Mobile";
+    else if (device.type === "tablet") type = "Tablet";
+    else if (navigator.maxTouchPoints > 2) type = "Mobile";
+    else type = "Desktop";
 
-    /* ---------------- FINAL LOG FOR DEBUGGING ---------------- */
-    console.info("📱 Ultra Device Detected:", {
+    console.info("📱 Device Detected:", {
       brand,
       model,
       os,
@@ -109,7 +97,7 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       type,
     });
   } catch (err) {
-    console.warn("Device detection failed (fallback to basic info):", err);
+    console.warn("Device detection failed:", err);
   }
 
   return {

@@ -18,8 +18,14 @@ type IPInfo = {
   city?: string;
   region?: string;
   country?: string;
-  org?: string;
-  source?: string;
+  isp?: string;
+  as?: string;
+};
+
+type SimInfo = {
+  carrier?: string;
+  confidence?: number;
+  method?: string;
 };
 
 type BatteryInfo = {
@@ -31,6 +37,7 @@ type NetworkInfo = {
   type?: string;
   downlink?: number;
   rtt?: number;
+  isp?: string;
   ipInfo?: IPInfo;
 };
 
@@ -46,173 +53,251 @@ export default function Sender({ sessionId }: Props) {
   const sessionRef = ref(db, `sessions/${sessionId}`);
   const connectedRef = ref(db, ".info/connected");
 
-  const [status, setStatus] = useState<"initializing" | "online" | "offline" | "error">("initializing");
+  const [status, setStatus] = useState<
+    "initializing" | "online" | "offline" | "error"
+  >("initializing");
+
   const [coords, setCoords] = useState<Coords | null>(null);
   const [ping, setPing] = useState<number>(0);
+
   const [device, setDevice] = useState<DeviceInfo | null>(null);
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
   const [battery, setBattery] = useState<BatteryInfo | null>(null);
+  const [sim, setSim] = useState<SimInfo | null>(null);
 
-  /* ---------------- SERVER-SIDE ISP DETECTION (Much Stronger) ---------------- */
-  /* ---------------- SERVER-SIDE ISP (Strongest Free Version) ---------------- */
-  const fetchISP = async (): Promise<IPInfo | null> => {
-    console.info("🔍 Calling /api/isp ...");
+  /* ---------------- FETCH ISP + SIM ---------------- */
 
-    try {
-      const res = await fetch("/api/isp", { 
-        method: "GET",
-        cache: "no-store",
-        headers: { "Cache-Control": "no-cache" }
-      });
+const fetchNetworkData = async () => {
+  try {
+    const res = await fetch("/api/isp", {
+      cache: "no-store",
+    });
 
-      if (!res.ok) throw new Error("API error");
+    if (!res.ok) throw new Error("ISP API failed");
 
-      const data = await res.json();
-
-      if (data.org) {
-        console.info("✅ ISP SUCCESS:", data.org, " | Source:", data.source);
-        return {
-          ip: data.ip,
-          city: data.city,
-          region: data.region,
-          country: data.country,
-          org: data.org,
-          source: data.source,
-        };
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("❌ ISP API failed:", msg);
-    }
-
-    console.warn("⚠️ ISP detection returned null");
+    return await res.json();
+  } catch (err) {
+    console.error("ISP fetch failed:", err);
     return null;
-  };
+  }
+};
 
   /* ---------------- INIT ---------------- */
+
   useEffect(() => {
     if (!sessionId || !navigator.geolocation) {
       setStatus("error");
       return;
     }
 
-    // Device Info
+    /* DEVICE */
     (async () => {
       const info = await getDeviceInfo();
       setDevice(info);
       update(sessionRef, { device: info });
     })();
 
-    // Network Base
-    const conn = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection;
-    const baseNetwork: NetworkInfo = conn ? {
-      type: conn.effectiveType,
-      downlink: conn.downlink,
-      rtt: conn.rtt,
-    } : {};
+    /* NETWORK BASE */
+    const conn =
+      (navigator as any).connection ||
+      (navigator as any).mozConnection ||
+      (navigator as any).webkitConnection;
+
+    const baseNetwork: NetworkInfo = conn
+      ? {
+          type: conn.effectiveType,
+          downlink: conn.downlink,
+          rtt: conn.rtt,
+        }
+      : {};
 
     setNetwork(baseNetwork);
-    update(sessionRef, {
-      "network/type": baseNetwork.type ?? null,
-      "network/downlink": baseNetwork.downlink ?? null,
-      "network/rtt": baseNetwork.rtt ?? null,
-    });
 
-    // ISP Detection (Server-side)
-    const runISP = async () => {
-      const ipInfo = await fetchISP();
-      if (ipInfo) {
-        setNetwork((prev) => ({ ...prev, ipInfo }));
-        update(sessionRef, { "network/ipInfo": ipInfo });
-      }
+    /* ISP + SIM */
+    const runNetwork = async () => {
+      const data = await fetchNetworkData();
+
+      if (!data) return;
+
+      const net: NetworkInfo = {
+        ...baseNetwork,
+        isp: data.isp,
+        ipInfo: {
+          ip: data.ip,
+          city: data.city,
+          region: data.region,
+          country: data.country,
+          isp: data.isp,
+          as: data.as,
+        },
+      };
+
+      const simData: SimInfo = data.sim || null;
+
+      setNetwork(net);
+      setSim(simData);
+
+      update(sessionRef, {
+        network: net,
+        sim: simData,
+      });
     };
-    runISP();
 
-    // Battery, Presence, Heartbeat, GPS (unchanged)
+    runNetwork();
+
+    /* BATTERY */
     const nav = navigator as any;
+
     if (nav.getBattery) {
       nav.getBattery().then((bat: any) => {
         const pushBattery = () => {
-          const info: BatteryInfo = { level: bat.level, charging: bat.charging };
+          const info: BatteryInfo = {
+            level: bat.level,
+            charging: bat.charging,
+          };
+
           setBattery(info);
           update(sessionRef, { battery: info });
         };
+
         pushBattery();
         bat.addEventListener("levelchange", pushBattery);
         bat.addEventListener("chargingchange", pushBattery);
       });
     }
 
-    const unsubscribe = onValue(connectedRef, (snap) => {
+    /* PRESENCE */
+    onValue(connectedRef, (snap) => {
       if (snap.val()) {
-        update(sessionRef, { status: "online", lastSeen: Date.now() });
-        onDisconnect(sessionRef).update({ status: "offline", lastSeen: Date.now() });
+        update(sessionRef, {
+          status: "online",
+          lastSeen: Date.now(),
+        });
+
+        onDisconnect(sessionRef).update({
+          status: "offline",
+          lastSeen: Date.now(),
+        });
+
         setStatus("online");
       } else {
         setStatus("offline");
       }
     });
 
+    /* HEARTBEAT */
     heartbeatRef.current = setInterval(async () => {
       const start = Date.now();
+
       try {
         await update(sessionRef, { heartbeat: start });
-        const latency = Date.now() - start;
-        setPing(latency);
-        update(sessionRef, { pingMs: latency, lastSeen: Date.now() });
+        setPing(Date.now() - start);
+
+        update(sessionRef, {
+          pingMs: Date.now() - start,
+          lastSeen: Date.now(),
+        });
       } catch {
         setPing(999);
       }
     }, 8000);
 
-    const handleSuccess = (pos: GeolocationPosition) => {
-      const now = Date.now();
-      if (now - lastGpsUpdate.current < 2000) return;
-      lastGpsUpdate.current = now;
-
-      const { latitude: lat, longitude: lng, accuracy } = pos.coords;
-      setCoords({ lat, lng, accuracy });
-      setStatus("online");
-
-      update(sessionRef, { lat, lng, accuracy, timestamp: now, lastSeen: now, status: "online" });
-    };
-
-    const handleError = () => setStatus("offline");
-
+    /* GPS */
     watchIdRef.current = navigator.geolocation.watchPosition(
-      handleSuccess, handleError, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+      (pos) => {
+        const now = Date.now();
+
+        if (now - lastGpsUpdate.current < 2000) return;
+        lastGpsUpdate.current = now;
+
+        const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+
+        setCoords({ lat, lng, accuracy });
+        setStatus("online");
+
+        update(sessionRef, {
+          lat,
+          lng,
+          accuracy,
+          timestamp: now,
+          lastSeen: now,
+          status: "online",
+        });
+      },
+      () => setStatus("offline"),
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
     );
 
+    /* CLEANUP */
     return () => {
-      if (watchIdRef.current) navigator.geolocation.clearWatch(watchIdRef.current);
-      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
-      update(sessionRef, { status: "offline", lastSeen: Date.now() });
+      if (watchIdRef.current)
+        navigator.geolocation.clearWatch(watchIdRef.current);
+
+      if (heartbeatRef.current)
+        clearInterval(heartbeatRef.current);
+
+      update(sessionRef, {
+        status: "offline",
+        lastSeen: Date.now(),
+      });
     };
   }, [sessionId]);
 
-  // UI (same as before)
+  /* ---------------- UI ---------------- */
+
   return (
     <div style={styles.container}>
       <h3>📡 Live Sender</h3>
+
       <p>Status: {status}</p>
       <p>Ping: {ping} ms</p>
 
-      {coords && <p>GPS: {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}</p>}
+      {coords && (
+        <p>
+          GPS: {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}
+        </p>
+      )}
 
       {network?.ipInfo && (
         <div style={{ marginTop: 10 }}>
           <p>IP: {network.ipInfo.ip}</p>
           <p>City: {network.ipInfo.city}</p>
           <p>Country: {network.ipInfo.country}</p>
-          <p style={{ fontWeight: 600 }}>ISP: {network.ipInfo.org}</p>
-          <p style={{ opacity: 0.6 }}>Source: {network.ipInfo.source}</p>
+
+          <p style={{ fontWeight: 600 }}>
+            ISP: {network.isp}
+          </p>
         </div>
       )}
 
-      {device && <p>Device: {device.brand} {device.model}</p>}
-      {network && <p>Network: {network.type} | {network.downlink}Mbps</p>}
+      {sim && (
+        <div style={{ marginTop: 10 }}>
+          <p style={{ fontWeight: 600 }}>
+            SIM: {sim.carrier}
+          </p>
+          <p style={{ opacity: 0.7 }}>
+            Confidence: {sim.confidence}
+          </p>
+        </div>
+      )}
+
+      {device && (
+        <p>
+          Device: {device.brand} {device.model}
+        </p>
+      )}
+
+      {network && (
+        <p>
+          Network: {network.type} | {network.downlink}Mbps
+        </p>
+      )}
+
       {battery && (
-        <p>Battery: {Math.round((battery.level || 0) * 100)}% {battery.charging ? "⚡ charging" : ""}</p>
+        <p>
+          Battery: {Math.round((battery.level || 0) * 100)}%
+          {battery.charging ? " ⚡ charging" : ""}
+        </p>
       )}
     </div>
   );
