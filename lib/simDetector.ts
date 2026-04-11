@@ -1,13 +1,13 @@
 /**
  * ██████████████████████████████████████████████████████████████
- * INTERNET PROVIDER DETECTOR – BANGLADESH (v3.0)
+ * SIM + ISP DETECTOR – BANGLADESH (v4.0 – Final Production Version)
  * 
- * NEW BEHAVIOUR:
- *   • On mobile data (4G/5G) → shows correct SIM carrier (high confidence)
- *   • On WiFi → shows the WiFi broadband ISP name (e.g. BTCL, Fiber@Home)
- *   • Never returns "Unknown" unless absolutely nothing is detected
+ * Behaviour (exactly as you wanted):
+ *   • On Mobile Data (4G/5G) → Correct SIM carrier with HIGH confidence
+ *   • On WiFi → Shows actual broadband ISP name (BTCL, Fiber@Home, etc.)
+ *   • Never returns "Unknown" unless literally nothing is detected
  * 
- * Fixed all wrong detection issues with real ISP strings & ASNs
+ * Fully integrated with Sender.tsx + /api/isp/route.ts
  * ██████████████████████████████████████████████████████████████
  */
 
@@ -20,8 +20,8 @@ export type SimCarrier =
   | "Unknown";
 
 export type SimResult = {
-  carrier: SimCarrier | string;   // can now be ISP name on WiFi
-  confidence: number; // 0–100
+  carrier: SimCarrier | string;   // string = broadband ISP name on WiFi
+  confidence: number;             // 0–100
   method: string;
   raw?: any;
 };
@@ -36,7 +36,7 @@ const carrierDatabase = [
   },
   {
     carrier: "Robi",
-    keywords: ["robi", "axiata", "robi axiata", "axiata bangladesh", "tm international", "robi axitata"],
+    keywords: ["robi", "axiata", "robi axiata", "axiata bangladesh", "tm international"],
     asns: ["AS24432"],
     weight: 1.0,
   },
@@ -77,12 +77,14 @@ function isCellularConnection(connectionType = "", effectiveType = ""): boolean 
   const eff = (effectiveType || "").toLowerCase();
   return (
     conn === "cellular" ||
-    eff === "4g" || eff === "5g" ||
-    eff.includes("4g") || eff.includes("5g")
+    eff === "4g" ||
+    eff === "5g" ||
+    eff.includes("4g") ||
+    eff.includes("5g")
   );
 }
 
-/* ---------------- MAIN DETECTOR (NEW LOGIC) ---------------- */
+/* ---------------- MAIN DETECTOR ---------------- */
 export function detectSimCarrier(input: {
   isp?: string;
   org?: string;
@@ -95,7 +97,9 @@ export function detectSimCarrier(input: {
   const asnRaw = (input.as || "").toUpperCase().trim();
   const isCellular = isCellularConnection(input.connectionType, input.effectiveType);
 
-  // Default fallback
+  console.log(`🔍 [SIM DETECTOR] Input → Cellular: ${isCellular} | ISP: "${ispRaw}" | ASN: ${asnRaw}`);
+
+  // Default fallback (will be overwritten in almost all cases)
   let best: SimResult = {
     carrier: "Unknown",
     confidence: 10,
@@ -103,23 +107,25 @@ export function detectSimCarrier(input: {
     raw: input,
   };
 
-  // STEP 1: If on mobile data → try to detect SIM carrier
+  // ====================== STEP 1: MOBILE DATA DETECTION ======================
   if (isCellular) {
     for (const entry of carrierDatabase) {
       let score = 0;
 
+      // Keyword match in ISP name
       if (entry.keywords.some((k) => ispRaw.includes(k))) score += 45;
+      // ASN match (very strong signal)
       if (entry.asns.some((a) => asnRaw === a || asnRaw.includes(a) || a.includes(asnRaw))) score += 40;
 
-      if (input.country === "Bangladesh") score += 8;
-      if (isCellular) score += 30;                    // big mobile boost
+      if (input.country?.toLowerCase() === "bangladesh") score += 10;
+      if (isCellular) score += 35;                    // huge boost for mobile connection
 
-      score = Math.min(score * entry.weight, 99);
+      score = Math.min(Math.round(score * entry.weight), 99);
 
       if (score > best.confidence) {
         best = {
           carrier: entry.carrier as SimCarrier,
-          confidence: Math.round(score),
+          confidence: score,
           method: "mobile_sim_carrier",
           raw: input,
         };
@@ -127,17 +133,21 @@ export function detectSimCarrier(input: {
     }
   }
 
-  // STEP 2: If we have a good mobile match → return it
-  if (best.confidence >= 40) {
+  // If we already have a strong mobile SIM match → return immediately
+  if (best.confidence >= 55) {
+    console.log(`✅ [SIM DETECTOR] Strong mobile match: ${best.carrier} (${best.confidence}%)`);
     return best;
   }
 
-  // STEP 3: WiFi or no good SIM match → show the actual ISP / broadband provider name
+  // ====================== STEP 2: WIFI / BROADBAND FALLBACK ======================
   const providerName = (input.isp || input.org || "Unknown ISP").trim();
+
+  // If it's clearly a generic backbone or WiFi ISP, still return it (as requested)
+  const isGeneric = isGenericWiFiOrBackbone(providerName);
 
   return {
     carrier: providerName,
-    confidence: isCellular ? 35 : 65,           // lower on mobile fallback, higher on WiFi
+    confidence: isCellular ? 45 : 75,   // slightly lower on mobile fallback, higher on pure WiFi
     method: isCellular ? "mobile_isp_fallback" : "wifi_broadband_isp",
     raw: input,
   };

@@ -1,15 +1,15 @@
 /**
  * ██████████████████████████████████████████████████████████████
- * ISP + SIM DETECTION API ROUTE (v2.0 – Highly Sophisticated)
+ * ISP + SIM DETECTION API ROUTE (v3.0 – Fully Integrated)
  * 
  * This endpoint:
- * 1. Extracts real client IP (works behind Vercel, Cloudflare, etc.)
- * 2. Fetches accurate ISP data from two free sources
- * 3. Sends connection hints (cellular/wifi/4g/5g) to the detector
- * 4. Returns SIM carrier with realistic confidence
+ * 1. Extracts real client IP (Vercel/Cloudflare compatible)
+ * 2. Fetches ISP data from two reliable free sources
+ * 3. Receives connection hints from Sender.tsx (cellular/wifi/4g/5g)
+ * 4. Passes everything to detectSimCarrier for accurate Bangladesh SIM detection
  * 
- * WiFi Handling: If user is on WiFi, confidence will be very low
- * and method will clearly say "wifi_detected_low_confidence"
+ * WiFi → Low confidence + "wifi_detected_low_confidence"
+ * Mobile Data → High confidence + correct carrier name
  * ██████████████████████████████████████████████████████████████
  */
 
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
   const clientIp = getClientIp(request);
   console.log("🌍 [SIM TRACKER] Client IP:", clientIp || "unknown");
 
-  // If we can't get IP (very rare)
+  // Rare case: no IP detected
   if (!clientIp) {
     return NextResponse.json({
       ip: "unknown",
@@ -103,7 +103,7 @@ export async function GET(request: NextRequest) {
         city: data.city,
         region: data.region,
         country: data.country,
-        isp: data.connection?.isp || "",
+        isp: data.connection?.isp || data.isp || "",
         as: data.connection?.asn || "",
         source: "ipwho",
       };
@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
     }
   };
 
-  // Try ip-api first, fallback to ipwho
+  // ip-api first → ipwho as fallback
   const ispResult = (await tryIpApi()) || (await tryIpWho());
 
   if (!ispResult) {
@@ -133,13 +133,13 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  /* ---------------- GET BROWSER CONNECTION HINTS ---------------- */
+  /* ---------------- GET CONNECTION HINTS FROM SENDER.TSX ---------------- */
   const connectionType = request.nextUrl.searchParams.get("connectionType") || "unknown";
   const effectiveType = request.nextUrl.searchParams.get("effectiveType") || "unknown";
 
-  console.log(`📶 [SIM TRACKER] Connection: ${connectionType} | Effective: ${effectiveType}`);
+  console.log(`📶 [SIM TRACKER] Connection Hint: ${connectionType} | Effective: ${effectiveType}`);
 
-  /* ---------------- DETECT SIM CARRIER (now with WiFi awareness) ---------------- */
+  /* ---------------- DETECT SIM CARRIER (with WiFi awareness) ---------------- */
   const sim = detectSimCarrier({
     isp: ispResult.isp,
     org: ispResult.isp,

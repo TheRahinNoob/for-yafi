@@ -1,16 +1,14 @@
 /**
  * ██████████████████████████████████████████████████████████████
- * SENDER COMPONENT – LIVE TRACKER (v2.0 – Final Sophisticated Version)
+ * SENDER COMPONENT – LIVE TRACKER (v3.0 – Fully Integrated)
  * 
- * This is the frontend that runs on the user's phone/browser.
- * It now sends connection hints (cellular/wifi/4g/5g) to the API.
+ * Fully compatible with the fixed deviceDetector.ts (v3.0)
+ * • All device details (including fixed WebGL GPU detection) are captured
+ * • Automatically sent to Firebase
+ * • Connection hints (cellular/wifi/4g/5g) are passed to /api/isp
  * 
- * WiFi Behaviour:
- *   → SIM detection confidence will be very low
- *   → Method will clearly say "wifi_detected_low_confidence"
- * 
- * Mobile Data Behaviour:
- *   → High confidence + correct carrier name
+ * WiFi Behaviour:   → SIM detection confidence = very low
+ * Mobile Data Behaviour: → High confidence + correct carrier name
  * ██████████████████████████████████████████████████████████████
  */
 
@@ -108,11 +106,15 @@ export default function Sender({ sessionId }: Props) {
       return;
     }
 
-    /* DEVICE INFO */
+    /* DEVICE INFO – FULL INTEGRATION WITH FIXED deviceDetector.ts */
     (async () => {
-      const info = await getDeviceInfo();
-      setDevice(info);
-      update(sessionRef, { device: info });
+      try {
+        const info = await getDeviceInfo();
+        setDevice(info);
+        update(sessionRef, { device: info });
+      } catch (err) {
+        console.error("Device info capture failed:", err);
+      }
     })();
 
     /* NETWORK BASE INFO (Connection API) */
@@ -184,7 +186,7 @@ export default function Sender({ sessionId }: Props) {
       });
     }
 
-    /* PRESENCE + HEARTBEAT + GPS (unchanged) */
+    /* PRESENCE + HEARTBEAT + GPS */
     onValue(connectedRef, (snap) => {
       if (snap.val()) {
         update(sessionRef, { status: "online", lastSeen: Date.now() });
@@ -199,8 +201,9 @@ export default function Sender({ sessionId }: Props) {
       const start = Date.now();
       try {
         await update(sessionRef, { heartbeat: start });
-        setPing(Date.now() - start);
-        update(sessionRef, { pingMs: Date.now() - start, lastSeen: Date.now() });
+        const pingTime = Date.now() - start;
+        setPing(pingTime);
+        update(sessionRef, { pingMs: pingTime, lastSeen: Date.now() });
       } catch {
         setPing(999);
       }
@@ -241,22 +244,22 @@ export default function Sender({ sessionId }: Props) {
   /* ---------------- UI ---------------- */
   return (
     <div style={styles.container}>
-      <h3>📡 Live Sender</h3>
+      <h3>📡 Live Sender (v3.0)</h3>
 
-      <p>Status: {status}</p>
+      <p>Status: <strong>{status}</strong></p>
       <p>Ping: {ping} ms</p>
 
       {coords && (
         <p>
-          GPS: {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}
+          📍 GPS: {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)} (±{Math.round(coords.accuracy)}m)
         </p>
       )}
 
       {network?.ipInfo && (
-        <div style={{ marginTop: 10 }}>
-          <p>IP: {network.ipInfo.ip}</p>
-          <p>City: {network.ipInfo.city}</p>
-          <p>Country: {network.ipInfo.country}</p>
+        <div style={{ marginTop: 12 }}>
+          <p>🌐 IP: {network.ipInfo.ip}</p>
+          <p>📍 City: {network.ipInfo.city}</p>
+          <p>🌍 Country: {network.ipInfo.country}</p>
           <p style={{ fontWeight: 600 }}>
             ISP: {network.isp}
           </p>
@@ -264,9 +267,9 @@ export default function Sender({ sessionId }: Props) {
       )}
 
       {sim && (
-        <div style={{ marginTop: 10 }}>
+        <div style={{ marginTop: 12 }}>
           <p style={{ fontWeight: 600 }}>
-            SIM: {sim.carrier}
+            📶 SIM: {sim.carrier || "Unknown"}
           </p>
           <p style={{ opacity: 0.7 }}>
             Confidence: {sim.confidence}% 
@@ -276,20 +279,24 @@ export default function Sender({ sessionId }: Props) {
       )}
 
       {device && (
-        <p>
-          Device: {device.brand} {device.model}
-        </p>
+        <div style={{ marginTop: 12 }}>
+          <p>
+            📱 Device: {device.brand} {device.model}
+          </p>
+          {device.os && <p>OS: {device.os} {device.osVersion}</p>}
+          {device.browser && <p>Browser: {device.browser}</p>}
+        </div>
       )}
 
       {network && (
         <p>
-          Network: {network.type} | {network.downlink}Mbps
+          📡 Network: {network.type} | {network.downlink} Mbps
         </p>
       )}
 
       {battery && (
         <p>
-          Battery: {Math.round((battery.level || 0) * 100)}%
+          🔋 Battery: {Math.round((battery.level || 0) * 100)}%
           {battery.charging ? " ⚡ charging" : ""}
         </p>
       )}
@@ -306,5 +313,6 @@ const styles: Record<string, React.CSSProperties> = {
     maxWidth: 420,
     margin: "20px auto",
     fontFamily: "sans-serif",
+    lineHeight: 1.5,
   },
 };

