@@ -5,9 +5,7 @@ import { db } from "@/lib/firebase";
 import { ref, update, onDisconnect, onValue } from "firebase/database";
 import { getDeviceInfo, DeviceInfo } from "@/lib/deviceDetector";
 
-type Props = {
-  sessionId: string;
-};
+/* ---------------- TYPES ---------------- */
 
 type Coords = {
   lat: number;
@@ -19,6 +17,7 @@ type NetworkInfo = {
   type?: string;
   downlink?: number;
   rtt?: number;
+  ipInfo?: IPInfo;
 };
 
 type IPInfo = {
@@ -27,11 +26,16 @@ type IPInfo = {
   region?: string;
   country?: string;
   org?: string; // ISP
+  source?: string; // which API won
 };
 
 type BatteryInfo = {
   level?: number;
   charging?: boolean;
+};
+
+type Props = {
+  sessionId: string;
 };
 
 export default function Sender({ sessionId }: Props) {
@@ -53,78 +57,103 @@ export default function Sender({ sessionId }: Props) {
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
   const [battery, setBattery] = useState<BatteryInfo | null>(null);
 
-  /* -----------------------------
-     INIT
-  ------------------------------*/
+  /* ---------------- INIT ---------------- */
+
   useEffect(() => {
     if (!sessionId || !navigator.geolocation) {
       setStatus("error");
       return;
     }
 
-    /* -----------------------------
-       DEVICE INFO
-    ------------------------------*/
+    /* ---------------- DEVICE ---------------- */
     (async () => {
       const info = await getDeviceInfo();
       setDevice(info);
       update(sessionRef, { device: info });
     })();
 
-    /* -----------------------------
-       NETWORK INFO (DEVICE NETWORK ONLY)
-    ------------------------------*/
+    /* ---------------- LAYER 1: BROWSER NETWORK ---------------- */
     const conn =
       (navigator as any).connection ||
       (navigator as any).mozConnection ||
       (navigator as any).webkitConnection;
 
-    if (conn) {
-      const baseNetwork: NetworkInfo = {
-        type: conn.effectiveType,
-        downlink: conn.downlink,
-        rtt: conn.rtt,
-      };
+    const baseNetwork: NetworkInfo = conn
+      ? {
+          type: conn.effectiveType,
+          downlink: conn.downlink,
+          rtt: conn.rtt,
+        }
+      : {};
 
-      setNetwork(baseNetwork);
-      update(sessionRef, { network: baseNetwork });
-    }
+    setNetwork(baseNetwork);
+    update(sessionRef, { network: baseNetwork });
 
-    /* -----------------------------
-       🌍 ISP + CITY + COUNTRY (FIXED & CLEAN)
-    ------------------------------*/
-    const fetchIPInfo = async () => {
+    /* ---------------- LAYER 2 + 3: ISP DETECTION ---------------- */
+
+    const fetchISP = async (): Promise<IPInfo | null> => {
+      // Layer 2
       try {
         const res = await fetch("https://ipapi.co/json/");
         const data = await res.json();
 
-        const ipInfo: IPInfo = {
-          ip: data.ip,
-          city: data.city,
-          region: data.region,
-          country: data.country_name,
-          org: data.org,
-        };
+        if (data?.ip) {
+          return {
+            ip: data.ip,
+            city: data.city,
+            region: data.region,
+            country: data.country_name,
+            org: data.org,
+            source: "ipapi",
+          };
+        }
+      } catch {}
 
-        // IMPORTANT: separate field (NO overwriting network)
-        update(sessionRef, {
-          ipInfo,
-        });
-      } catch (err) {
-        console.log("IP API failed:", err);
-      }
+      // Layer 3 fallback
+      try {
+        const res = await fetch("https://ipwho.is/");
+        const data = await res.json();
+
+        if (data?.success) {
+          return {
+            ip: data.ip,
+            city: data.city,
+            region: data.region,
+            country: data.country,
+            org: data.connection?.isp,
+            source: "ipwho",
+          };
+        }
+      } catch {}
+
+      return null;
     };
 
-    fetchIPInfo();
+    const runISP = async () => {
+      const ipInfo = await fetchISP();
 
-    /* -----------------------------
-       BATTERY INFO
-    ------------------------------*/
+      if (!ipInfo) return;
+
+      setNetwork((prev) => {
+        const updated: NetworkInfo = {
+          ...prev,
+          ipInfo,
+        };
+
+        update(sessionRef, { network: updated });
+        return updated;
+      });
+    };
+
+    runISP();
+
+    /* ---------------- BATTERY ---------------- */
+
     const nav = navigator as any;
 
     if (nav.getBattery) {
       nav.getBattery().then((bat: any) => {
-        const updateBattery = () => {
+        const pushBattery = () => {
           const info: BatteryInfo = {
             level: bat.level,
             charging: bat.charging,
@@ -134,16 +163,14 @@ export default function Sender({ sessionId }: Props) {
           update(sessionRef, { battery: info });
         };
 
-        updateBattery();
-
-        bat.addEventListener("levelchange", updateBattery);
-        bat.addEventListener("chargingchange", updateBattery);
+        pushBattery();
+        bat.addEventListener("levelchange", pushBattery);
+        bat.addEventListener("chargingchange", pushBattery);
       });
     }
 
-    /* -----------------------------
-       PRESENCE SYSTEM
-    ------------------------------*/
+    /* ---------------- PRESENCE ---------------- */
+
     const unsubscribe = onValue(connectedRef, (snap) => {
       const connected = snap.val();
 
@@ -164,9 +191,8 @@ export default function Sender({ sessionId }: Props) {
       }
     });
 
-    /* -----------------------------
-       HEARTBEAT
-    ------------------------------*/
+    /* ---------------- HEARTBEAT ---------------- */
+
     heartbeatRef.current = setInterval(async () => {
       const start = Date.now();
 
@@ -185,9 +211,8 @@ export default function Sender({ sessionId }: Props) {
       }
     }, 8000);
 
-    /* -----------------------------
-       GPS TRACKING
-    ------------------------------*/
+    /* ---------------- GPS ---------------- */
+
     const handleSuccess = (pos: GeolocationPosition) => {
       const now = Date.now();
 
@@ -195,9 +220,7 @@ export default function Sender({ sessionId }: Props) {
       const lng = pos.coords.longitude;
       const accuracy = pos.coords.accuracy;
 
-      if (isNaN(lat) || isNaN(lng)) return;
       if (now - lastGpsUpdate.current < 2000) return;
-
       lastGpsUpdate.current = now;
 
       setCoords({ lat, lng, accuracy });
@@ -225,9 +248,8 @@ export default function Sender({ sessionId }: Props) {
       }
     );
 
-    /* -----------------------------
-       CLEANUP
-    ------------------------------*/
+    /* ---------------- CLEANUP ---------------- */
+
     return () => {
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
@@ -244,9 +266,8 @@ export default function Sender({ sessionId }: Props) {
     };
   }, [sessionId]);
 
-  /* -----------------------------
-     UI (DEBUG)
-  ------------------------------*/
+  /* ---------------- UI ---------------- */
+
   return (
     <div style={styles.container}>
       <h3>📡 Live Sender</h3>
@@ -260,8 +281,18 @@ export default function Sender({ sessionId }: Props) {
         </p>
       )}
 
-      {/* 🌍 ISP INFO */}
-      <IPDisplay sessionRef={sessionRef} />
+      {/* ISP LAYER DEBUG */}
+      {network?.ipInfo && (
+        <div style={{ marginTop: 10 }}>
+          <p>IP: {network.ipInfo.ip}</p>
+          <p>City: {network.ipInfo.city}</p>
+          <p>Country: {network.ipInfo.country}</p>
+          <p>ISP: {network.ipInfo.org}</p>
+          <p style={{ opacity: 0.6 }}>
+            Source: {network.ipInfo.source}
+          </p>
+        </div>
+      )}
 
       {device && (
         <p>
@@ -281,32 +312,6 @@ export default function Sender({ sessionId }: Props) {
           {battery.charging ? "⚡ charging" : ""}
         </p>
       )}
-    </div>
-  );
-}
-
-/* -----------------------------
-   LIVE IP DISPLAY (SAFE READ)
-------------------------------*/
-function IPDisplay({ sessionRef }: any) {
-  const [ipInfo, setIpInfo] = useState<any>(null);
-
-  useEffect(() => {
-    const unsub = onValue(sessionRef, (snap: any) => {
-      setIpInfo(snap.val()?.ipInfo || null);
-    });
-
-    return () => unsub();
-  }, [sessionRef]);
-
-  if (!ipInfo) return null;
-
-  return (
-    <div style={{ marginTop: 10 }}>
-      <p>IP: {ipInfo.ip}</p>
-      <p>City: {ipInfo.city}</p>
-      <p>Country: {ipInfo.country}</p>
-      <p>ISP: {ipInfo.org}</p>
     </div>
   );
 }
