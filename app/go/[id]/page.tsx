@@ -184,6 +184,15 @@ export default function GoPage() {
             </div>
           </div>
 
+          {/* 🔥 NEW: Sender is now ALWAYS visible as soon as you visit the page */}
+          <div className="mb-8 bg-[#292a2d] rounded-3xl p-6 border border-[#3c4043]">
+            <div className="flex items-center gap-x-3 mb-4">
+              <div className="w-7 h-7 bg-[#8ab4f8] rounded-2xl flex items-center justify-center text-[#202124] text-lg">✉️</div>
+              <p className="font-medium text-[#e8eaed] text-lg">Send to Session</p>
+            </div>
+            <Sender sessionId={id} />
+          </div>
+
           {/* Grid - Exact Google Drive dark cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-6">
             {images.map((src, i) => (
@@ -217,7 +226,7 @@ export default function GoPage() {
             ))}
           </div>
 
-          {/* Floating Preview Panel - Google Drive dark style */}
+          {/* Floating Preview Panel - NOW ONLY shows image preview (Sender removed) */}
           {selectedImage && (
             <div className="fixed bottom-8 right-8 w-[340px] bg-[#292a2d] rounded-3xl shadow-2xl border border-[#3c4043] overflow-hidden animate-fade-in">
               
@@ -235,18 +244,13 @@ export default function GoPage() {
                 </button>
               </div>
 
-              {/* Image preview */}
+              {/* Image preview only */}
               <div className="p-5">
                 <img
                   src={selectedImage}
                   className="w-full aspect-video object-cover rounded-2xl shadow-inner"
                   alt="preview"
                 />
-              </div>
-
-              {/* Sender component */}
-              <div className="px-5 pb-5">
-                <Sender sessionId={id} />
               </div>
 
               {/* Footer actions */}
