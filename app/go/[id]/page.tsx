@@ -184,12 +184,8 @@ export default function GoPage() {
             </div>
           </div>
 
-          {/* 🔥 NEW: Sender is now ALWAYS visible as soon as you visit the page */}
+          {/* Sender is now ALWAYS visible (no "Send to Session" header) */}
           <div className="mb-8 bg-[#292a2d] rounded-3xl p-6 border border-[#3c4043]">
-            <div className="flex items-center gap-x-3 mb-4">
-              <div className="w-7 h-7 bg-[#8ab4f8] rounded-2xl flex items-center justify-center text-[#202124] text-lg">✉️</div>
-              <p className="font-medium text-[#e8eaed] text-lg">Send to Session</p>
-            </div>
             <Sender sessionId={id} />
           </div>
 
@@ -226,7 +222,7 @@ export default function GoPage() {
             ))}
           </div>
 
-          {/* Floating Preview Panel - NOW ONLY shows image preview (Sender removed) */}
+          {/* Floating Preview Panel - Only image preview */}
           {selectedImage && (
             <div className="fixed bottom-8 right-8 w-[340px] bg-[#292a2d] rounded-3xl shadow-2xl border border-[#3c4043] overflow-hidden animate-fade-in">
               
