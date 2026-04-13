@@ -14,15 +14,16 @@ export default function GoPage() {
   // 2. Put your images inside that folder
   // 3. Add or remove lines below exactly like this:
   const initialImages: string[] = [
-    "/images/photo1.jpg",
-    "/images/photo2.jpg",
-    "/images/vacation.png",
-    "/images/screenshot.webp",
-    "/images/my-image-5.jpg",
-    // Add more images here (one line per image)
-    // Example:
-    // "/images/another-one.png",
-    // "/images/cat.jpg",
+    "/images/bondhu (1).jpeg",
+    "/images/bondhu (2).jpeg",
+    "/images/bondhu (3).jpeg",
+    "/images/bondhu (4).jpeg",
+    "/images/bondhu (5).jpeg",
+    "/images/bondhu (6).jpeg",
+    "/images/bondhu (7).jpeg",
+    "/images/bondhu (8).jpeg",
+    "/images/bondhu (9).jpeg",
+    "/images/bondhu (10).jpeg",
   ];
   // ===================================================================
 
