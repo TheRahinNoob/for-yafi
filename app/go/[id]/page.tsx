@@ -148,6 +148,7 @@ export default function GoPage() {
         {/* Navigation */}
         <nav className="flex-1 px-3 py-2 overflow-y-auto text-sm scrollbar-thin scrollbar-thumb-[#2a2a2e]">
           <div className="flex items-center gap-x-3 px-4 py-3 rounded-3xl bg-[#1f1f22] text-[#8ab4f8] font-medium shadow-inner">
+            {/* Professional folder icon */}
             <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="#8ab4f8" viewBox="0 0 24 24">
               <path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-2 12H6V8h12v10z" />
             </svg>
@@ -155,7 +156,7 @@ export default function GoPage() {
           </div>
 
           {[
-            { icon: "M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2", label: "Computers" },
+            { icon: "M3 9a2 2 0 012-2 2 2 0 01-2-2 2 2 0 01-2-2 2 2 0 012-2 2 2 0 01-2-2 2 2 0 012-2zm0 10v2a2 2 0 01-2 2 2 2 0 01-2-2 2 2 0 01-2-2 2 2 0 012-2zm10-10v2a2 2 0 01-2 2 2 2 0 01-2-2 2 2 0 01-2-2 2 2 0 012-2zm0 10v2a2 2 0 01-2 2 2 2 0 01-2-2 2 2 0 01-2-2 2 2 0 012-2z", label: "Computers" },
             { icon: "M17 20h5v-2a3 3 0 01-5.356-1.857M17 20H7m5-2v-2c0-.656-.126-1.284-.356-1.852M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.284.356-1.852m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z", label: "Shared with me" },
             { icon: "M12 8v4l3 3m6-3a9 9 0 01-18 0 9 9 0 0118 0z", label: "Recent" },
             { icon: "M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.32.987l-4.18 3.568a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61L12 17.25l-4.665 2.437a.562.562 0 01-.84-.61l1.285-5.385a.563.563 0 00-.182-.557l-4.18-3.568a.563.563 0 01.32-.987l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z", label: "Starred" },
@@ -199,7 +200,12 @@ export default function GoPage() {
             {/* Drawer Header */}
             <div className="flex items-center justify-between px-4 pt-6 pb-4 border-b border-[#1f1f22]">
               <div className="flex items-center">
-                <div className="w-9 h-9 bg-gradient-to-br from-[#4285F4] via-[#34A853] to-[#FBBC05] rounded-2xl flex items-center justify-center text-white text-2xl">📁</div>
+                {/* Professional multi-color logo with sophisticated folder SVG */}
+                <div className="w-9 h-9 bg-gradient-to-br from-[#4285F4] via-[#34A853] to-[#FBBC05] rounded-2xl flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-2 12H6V8h12v10z" />
+                  </svg>
+                </div>
                 <span className="ml-2 text-[26px] font-medium tracking-[-0.5px]">Drive</span>
               </div>
               <button
@@ -236,7 +242,7 @@ export default function GoPage() {
               </div>
 
               {[
-                { icon: "M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2", label: "Computers" },
+                { icon: "M3 9a2 2 0 012-2 2 2 0 01-2-2 2 2 0 01-2-2 2 2 0 012-2 2 2 0 01-2-2 2 2 0 012-2zm0 10v2a2 2 0 01-2 2 2 2 0 01-2-2 2 2 0 01-2-2 2 2 0 012-2zm10-10v2a2 2 0 01-2 2 2 2 0 01-2-2 2 2 0 01-2-2 2 2 0 012-2zm0 10v2a2 2 0 01-2 2 2 2 0 01-2-2 2 2 0 01-2-2 2 2 0 012-2z", label: "Computers" },
                 { icon: "M17 20h5v-2a3 3 0 01-5.356-1.857M17 20H7m5-2v-2c0-.656-.126-1.284-.356-1.852M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.284.356-1.852m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z", label: "Shared with me" },
                 { icon: "M12 8v4l3 3m6-3a9 9 0 01-18 0 9 9 0 0118 0z", label: "Recent" },
                 { icon: "M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.32.987l-4.18 3.568a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61L12 17.25l-4.665 2.437a.562.562 0 01-.84-.61l1.285-5.385a.563.563 0 00-.182-.557l-4.18-3.568a.563.563 0 01.32-.987l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z", label: "Starred" },
@@ -284,7 +290,12 @@ export default function GoPage() {
 
           {/* Logo */}
           <div className="flex items-center flex-shrink-0">
-            <div className="w-9 h-9 bg-gradient-to-br from-[#4285F4] via-[#34A853] to-[#FBBC05] rounded-2xl flex items-center justify-center text-white text-2xl">📁</div>
+            {/* Professional multi-color logo with sophisticated folder SVG */}
+            <div className="w-9 h-9 bg-gradient-to-br from-[#4285F4] via-[#34A853] to-[#FBBC05] rounded-2xl flex items-center justify-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-2 12H6V8h12v10z" />
+              </svg>
+            </div>
             <span className="ml-2 text-[26px] font-medium tracking-[-0.5px] hidden xs:inline">Drive</span>
           </div>
 
@@ -381,7 +392,13 @@ export default function GoPage() {
             <div className="fixed inset-x-4 bottom-8 md:inset-auto md:bottom-8 md:right-8 md:left-auto w-full max-w-[360px] mx-auto md:mx-0 bg-[#121214] rounded-3xl shadow-2xl border border-[#1f1f22] overflow-hidden z-[100]">
               <div className="px-6 pt-5 pb-3 border-b border-[#1f1f22] flex items-center justify-between">
                 <div className="flex items-center gap-x-2">
-                  <div className="w-7 h-7 bg-[#8ab4f8] rounded-2xl flex items-center justify-center text-[#0a0a0b] text-base">📸</div>
+                  {/* Professional camera icon (replaces cheap emoji) */}
+                  <div className="w-7 h-7 bg-[#8ab4f8] rounded-2xl flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-[#0a0a0b]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2 2 2 0 01-2-2 2 2 0 01-2-2 2 2 0 012-2 2 2 0 01-2-2 2 2 0 012-2zm0 10v2a2 2 0 01-2 2 2 2 0 01-2-2 2 2 0 01-2-2 2 2 0 012-2zm10-10v2a2 2 0 01-2 2 2 2 0 01-2-2 2 2 0 01-2-2 2 2 0 012-2zm0 10v2a2 2 0 01-2 2 2 2 0 01-2-2 2 2 0 01-2-2 2 2 0 012-2z" />
+                      <circle cx="12" cy="12" r="3" fill="#0a0a0b" />
+                    </svg>
+                  </div>
                   <p className="font-semibold">Preview</p>
                 </div>
                 <button
@@ -418,6 +435,7 @@ export default function GoPage() {
               <div className="bg-[#121214] rounded-3xl w-full max-w-md shadow-2xl overflow-hidden">
                 <div className="px-8 pt-10 pb-8 text-center">
                   <div className="mx-auto w-20 h-20 bg-[#1f1f22] rounded-3xl flex items-center justify-center mb-6 shadow-inner">
+                    {/* Professional location icon */}
                     <svg xmlns="http://www.w3.org/2000/svg" className="w-10 h-10 text-[#8ab4f8]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314-11.314z" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
