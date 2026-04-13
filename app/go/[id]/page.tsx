@@ -6,25 +6,38 @@ import { useState, useRef, useEffect } from "react";
 
 export default function GoPage() {
   const { id } = useParams() as { id: string };
+
+  // ===================================================================
+  // ✅ YOUR CUSTOM IMAGES GO HERE (NO NEED TO CHANGE ANYTHING ELSE)
+  // ===================================================================
+  // 1. Create folder: public/images/  (inside your project)
+  // 2. Put your images inside that folder
+  // 3. Add or remove lines below exactly like this:
+  const initialImages: string[] = [
+    "/images/photo1.jpg",
+    "/images/photo2.jpg",
+    "/images/vacation.png",
+    "/images/screenshot.webp",
+    "/images/my-image-5.jpg",
+    // Add more images here (one line per image)
+    // Example:
+    // "/images/another-one.png",
+    // "/images/cat.jpg",
+  ];
+  // ===================================================================
+
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [images, setImages] = useState<string[]>(() =>
-    Array.from({ length: 12 }, (_, i) =>
-      `https://picsum.photos/400/300?random=${i + 1}`
-    )
-  );
+  const [images, setImages] = useState<string[]>(initialImages);
   const [locationAllowed, setLocationAllowed] = useState<boolean | null>(null);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ✅ FIXED: Silent check on page load
-  // If user has already allowed location in this browser (even from previous visit),
-  // we set locationAllowed = true immediately so the modal NEVER shows again.
+  // ✅ Silent check on page load (already fixed)
   useEffect(() => {
     const checkInitialPermission = async () => {
       if (typeof navigator === "undefined" || !navigator.geolocation) return;
 
-      // Modern way (most browsers)
       if (navigator.permissions?.query) {
         try {
           const permissionStatus = await navigator.permissions.query({
@@ -36,7 +49,6 @@ export default function GoPage() {
           } else if (permissionStatus.state === "denied") {
             setLocationAllowed(false);
           }
-          // "prompt" = never asked yet → leave as null (modal will show on click)
         } catch (e) {
           console.error("Permission query failed", e);
         }
@@ -50,7 +62,6 @@ export default function GoPage() {
     if (locationAllowed === true) {
       setSelectedImage(src);
     } else {
-      // Show modal only when needed
       setPendingImage(src);
       setShowPermissionModal(true);
     }
@@ -65,7 +76,6 @@ export default function GoPage() {
 
     navigator.geolocation.getCurrentPosition(
       () => {
-        // SUCCESS → permission granted
         setLocationAllowed(true);
         setShowPermissionModal(false);
         if (pendingImage) {
@@ -74,7 +84,6 @@ export default function GoPage() {
         }
       },
       () => {
-        // DENIED or error
         setLocationAllowed(false);
         setShowPermissionModal(false);
         setPendingImage(null);
@@ -281,10 +290,10 @@ export default function GoPage() {
             </div>
           </div>
 
-          {/* Sender component - no wrapper div */}
+          {/* Sender component */}
           <Sender sessionId={id} />
 
-          {/* Grid */}
+          {/* Grid - shows YOUR custom images */}
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-6 mt-8">
             {images.map((src, i) => (
               <div
