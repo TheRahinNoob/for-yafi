@@ -1,7 +1,6 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import Sender from "@/components/Sender";
 import { useState } from "react";
 
 export default function GoPage() {
@@ -182,11 +181,6 @@ export default function GoPage() {
                 </svg>
               </button>
             </div>
-          </div>
-
-          {/* Sender is now ALWAYS visible (no "Send to Session" header) */}
-          <div className="mb-8 bg-[#292a2d] rounded-3xl p-6 border border-[#3c4043]">
-            <Sender sessionId={id} />
           </div>
 
           {/* Grid - Exact Google Drive dark cards */}
